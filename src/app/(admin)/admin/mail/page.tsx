@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { supabase, type ScannedMail } from '@/lib/supabase'
 import { StatusPill } from '@/components/ui/StatusPill'
 import { CommandPalette } from '@/components/ui/CommandPalette'
+import { UploadMailModal } from '@/components/ui/UploadMailModal'
 import { Search, Filter, Upload, Package, Mail, MoreHorizontal } from 'lucide-react'
 
 // Extended type for mail items based on spec
@@ -30,6 +31,7 @@ export default function MailPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [packageTypeFilter, setPackageTypeFilter] = useState<string>('all')
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
 
   useEffect(() => {
     fetchMailItems()
@@ -98,7 +100,7 @@ export default function MailPage() {
           </div>
           <button
             className="inline-flex items-center px-4 py-2 bg-[#0F172A] text-white rounded-lg hover:bg-gray-800 transition-colors"
-            onClick={() => {/* TODO: Open upload modal */}}
+            onClick={() => setIsUploadModalOpen(true)}
           >
             <Upload className="w-4 h-4 mr-2" />
             Upload Mail
@@ -243,6 +245,12 @@ export default function MailPage() {
           </div>
         )}
       </div>
+
+      <UploadMailModal
+        isOpen={isUploadModalOpen}
+        onClose={() => setIsUploadModalOpen(false)}
+        onSuccess={() => fetchMailItems()}
+      />
     </>
   )
 }
