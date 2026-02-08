@@ -60,6 +60,48 @@ class BrowserApiClient {
     this.client = createClient()
   }
 
+  // Mailboxes
+  async getMailboxes(filters?: {
+    status?: 'active' | 'cancelled'
+    search?: string
+  }) {
+    let query = this.client
+      .from('mailboxes')
+      .select('*')
+      .order('pmb', { ascending: true })
+    
+    if (filters?.status) {
+      query = query.eq('status', filters.status)
+    }
+    
+    const { data, error } = await query
+    if (error) throw error
+    
+    let mailboxes = data as Mailbox[]
+    
+    // Client-side search (until we have full-text search)
+    if (filters?.search) {
+      const searchLower = filters.search.toLowerCase()
+      mailboxes = mailboxes.filter(m => 
+        m.pmb.toLowerCase().includes(searchLower) ||
+        m.mailbox_name.toLowerCase().includes(searchLower)
+      )
+    }
+    
+    return mailboxes
+  }
+
+  async getMailboxById(mailboxId: string) {
+    const { data, error } = await this.client
+      .from('mailboxes')
+      .select('*')
+      .eq('mailbox_id', mailboxId)
+      .single()
+    
+    if (error) throw error
+    return data as Mailbox
+  }
+
   // Dashboard Stats
   async getDashboardStats() {
     const [pendingAliasesResult, todayScansResult] = await Promise.all([
