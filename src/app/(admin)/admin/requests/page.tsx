@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import { StatusPill } from '@/components/ui/StatusPill'
 import { CommandPalette } from '@/components/ui/CommandPalette'
+import { ForwardMailDetail } from '@/components/ui/ForwardMailDetail'
+import { OpenScanDetail } from '@/components/ui/OpenScanDetail'
 import { 
   Scan, 
   Trash2, 
@@ -85,6 +87,7 @@ export default function RequestsPage() {
   const [requestCounts, setRequestCounts] = useState<RequestType[]>(requestTypes)
   const [requests, setRequests] = useState<Request[]>([])
   const [loading, setLoading] = useState(true)
+  const [selectedRequest, setSelectedRequest] = useState<Request | null>(null)
 
   useEffect(() => {
     fetchRequestData()
@@ -267,7 +270,10 @@ export default function RequestsPage() {
                       <StatusPill status={request.status} />
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <button className="inline-flex items-center text-sm text-blue-600 hover:text-blue-700 font-medium">
+                      <button 
+                        onClick={() => setSelectedRequest(request)}
+                        className="inline-flex items-center text-sm text-blue-600 hover:text-blue-700 font-medium"
+                      >
                         View
                         <ChevronRight className="w-4 h-4 ml-1" />
                       </button>
@@ -295,6 +301,20 @@ export default function RequestsPage() {
           </div>
         )}
       </div>
+
+      {/* Request Detail Panels */}
+      {selectedRequest?.request_type === 'forward' && (
+        <ForwardMailDetail
+          requestId={selectedRequest.request_id}
+          onClose={() => setSelectedRequest(null)}
+        />
+      )}
+      {selectedRequest?.request_type === 'open_scan' && (
+        <OpenScanDetail
+          requestId={selectedRequest.request_id}
+          onClose={() => setSelectedRequest(null)}
+        />
+      )}
     </>
   )
 }
