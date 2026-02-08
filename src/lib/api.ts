@@ -1,6 +1,17 @@
 import { createClient } from '@/lib/supabase-browser'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+// Renter type from spec
+export interface Renter {
+  renter_id: string
+  mailbox_id: string
+  full_name: string
+  email: string
+  phone?: string
+  registration_date: string
+  is_active: boolean
+}
+
 // Types from spec
 export interface MailItem {
   mail_item_id: string
@@ -58,6 +69,49 @@ class BrowserApiClient {
 
   constructor() {
     this.client = createClient()
+  }
+
+  // Renters
+  async getRenters(filters?: {
+    search?: string
+    mailboxId?: string
+  }) {
+    let query = this.client
+      .from('renters')
+      .select('*')
+      .order('full_name', { ascending: true })
+
+    if (filters?.mailboxId) {
+      query = query.eq('mailbox_id', filters.mailboxId)
+    }
+
+    const { data, error } = await query
+    if (error) throw error
+
+    let renters = data as Renter[]
+
+    // Client-side search
+    if (filters?.search) {
+      const searchLower = filters.search.toLowerCase()
+      renters = renters.filter(r =>
+        r.full_name.toLowerCase().includes(searchLower) ||
+        r.email.toLowerCase().includes(searchLower) ||
+        (r.phone?.toLowerCase().includes(searchLower) ?? false)
+      )
+    }
+
+    return renters
+  }
+
+  async getRenterById(renterId: string) {
+    const { data, error } = await this.client
+      .from('renters')
+      .select('*')
+      .eq('renter_id', renterId)
+      .single()
+
+    if (error) throw error
+    return data as Renter
   }
 
   // Mailboxes
