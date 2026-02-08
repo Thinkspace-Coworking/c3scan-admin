@@ -1,6 +1,32 @@
 import { createClient } from '@/lib/supabase-browser'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+// Payment Method type
+export interface PaymentMethod {
+  payment_method_id: string
+  operator_id: string
+  brand: string
+  last4: string
+  exp_month: number
+  exp_year: number
+  is_default: boolean
+  created_at: string
+}
+
+// Invoice type
+export interface Invoice {
+  invoice_id: string
+  operator_id: string
+  mailbox_id: string
+  period_start: string
+  period_end: string
+  amount_cents: number
+  status: 'draft' | 'open' | 'paid' | 'uncollectible' | 'void'
+  due_date: string
+  created_at: string
+  pdf_path?: string
+}
+
 // Renter type from spec
 export interface Renter {
   renter_id: string
@@ -69,6 +95,58 @@ class BrowserApiClient {
 
   constructor() {
     this.client = createClient()
+  }
+
+  // Billing - Payment Methods
+  async getPaymentMethods() {
+    const { data, error } = await this.client
+      .from('payment_methods')
+      .select('*')
+      .order('is_default', { ascending: false })
+      .order('created_at', { ascending: false })
+    
+    if (error) throw error
+    return data as PaymentMethod[]
+  }
+
+  async deletePaymentMethod(paymentMethodId: string) {
+    const { error } = await this.client
+      .from('payment_methods')
+      .delete()
+      .eq('payment_method_id', paymentMethodId)
+    
+    if (error) throw error
+  }
+
+  // Billing - Invoices
+  async getInvoices(filters?: {
+    status?: string
+    search?: string
+  }) {
+    let query = this.client
+      .from('invoices')
+      .select('*')
+      .order('created_at', { ascending: false })
+    
+    if (filters?.status) {
+      query = query.eq('status', filters.status)
+    }
+    
+    const { data, error } = await query
+    if (error) throw error
+    
+    let invoices = data as Invoice[]
+    
+    // Client-side search
+    if (filters?.search) {
+      const searchLower = filters.search.toLowerCase()
+      invoices = invoices.filter(i => 
+        i.invoice_id.toLowerCase().includes(searchLower) ||
+        i.mailbox_id.toLowerCase().includes(searchLower)
+      )
+    }
+    
+    return invoices
   }
 
   // Renters
