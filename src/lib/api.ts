@@ -131,6 +131,17 @@ class BrowserApiClient {
     this.client = createClient()
   }
 
+  // Helper to safely get current user ID
+  private async getCurrentUserId(): Promise<string | null> {
+    try {
+      const { data: sessionData } = await this.client.auth.getSession()
+      return sessionData.session?.user?.id || null
+    } catch (error) {
+      // AuthSessionMissingError is expected for unauthenticated users
+      return null
+    }
+  }
+
   // Operators
   async getUserOperators() {
     const { data, error } = await this.client
@@ -629,8 +640,7 @@ class BrowserApiClient {
 
   // Get customer's mailboxes (where they have membership)
   async getCustomerMailboxes() {
-    const { data: sessionData } = await this.client.auth.getSession()
-    const userId = sessionData.session?.user?.id
+    const userId = await this.getCurrentUserId()
     
     if (!userId) {
       throw new Error('Not authenticated')
@@ -692,8 +702,7 @@ class BrowserApiClient {
     notes?: string
     metadata?: Record<string, unknown>
   }) {
-    const { data: sessionData } = await this.client.auth.getSession()
-    const userId = sessionData.session?.user?.id
+    const userId = await this.getCurrentUserId()
     
     if (!userId) {
       throw new Error('Not authenticated')
@@ -758,8 +767,7 @@ class BrowserApiClient {
 
   // Get customer's requests
   async getCustomerRequests(mailboxId?: string, status?: string) {
-    const { data: sessionData } = await this.client.auth.getSession()
-    const userId = sessionData.session?.user?.id
+    const userId = await this.getCurrentUserId()
     
     if (!userId) {
       throw new Error('Not authenticated')
@@ -792,8 +800,7 @@ class BrowserApiClient {
 
   // Cancel a pending request (customer can only cancel their own pending requests)
   async cancelRequest(requestId: string) {
-    const { data: sessionData } = await this.client.auth.getSession()
-    const userId = sessionData.session?.user?.id
+    const userId = await this.getCurrentUserId()
     
     if (!userId) {
       throw new Error('Not authenticated')
