@@ -90,9 +90,13 @@ export default function AdminLayout({
         <nav className="w-16 bg-white border-r border-gray-200 flex flex-col items-center py-4 fixed h-full z-10 top-0">
           {/* Logo */}
           <div className="mb-8">
-            <div className="w-10 h-10 bg-[#FFCC00] rounded-lg flex items-center justify-center">
-              <span className="font-bold text-black text-sm">C3</span>
-            </div>
+            <Link href="/admin">
+              <img 
+                src="/logo-square.png" 
+                alt="C3Scan" 
+                className="w-10 h-10 object-contain rounded-lg cursor-pointer hover:opacity-80 transition-opacity"
+              />
+            </Link>
           </div>
 
           {/* Navigation Icons */}

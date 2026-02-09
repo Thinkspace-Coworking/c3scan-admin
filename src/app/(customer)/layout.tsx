@@ -55,9 +55,11 @@ export default function CustomerLayout({
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
             <Link href="/app" className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-[#FFCC00] rounded-lg flex items-center justify-center">
-                <span className="font-bold text-black text-sm">C3</span>
-              </div>
+              <img 
+                src="/logo-square.png" 
+                alt="C3Scan" 
+                className="w-10 h-10 object-contain rounded-lg"
+              />
               <span className="font-semibold text-gray-900 hidden sm:block">
                 {selectedOperator?.operator_name || 'C3Scan'}
               </span>

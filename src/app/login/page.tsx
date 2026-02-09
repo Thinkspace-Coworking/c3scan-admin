@@ -26,8 +26,12 @@ export default function LoginPage() {
     <div className="min-h-screen bg-[#F7F9FC] flex flex-col items-center justify-center p-4">
       <div className="text-center max-w-md w-full">
         {/* Logo */}
-        <div className="w-20 h-20 bg-[#FFCC00] rounded-2xl flex items-center justify-center mx-auto mb-6">
-          <span className="font-bold text-black text-2xl">C3</span>
+        <div className="w-20 h-20 mx-auto mb-6">
+          <img 
+            src="/logo-square.png" 
+            alt="C3Scan" 
+            className="w-full h-full object-contain"
+          />
         </div>
 
         <h1 className="text-3xl font-bold text-gray-900 mb-2">C3Scan Admin</h1>
