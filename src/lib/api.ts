@@ -780,6 +780,80 @@ class BrowserApiClient {
       console.error('Failed to revert mail item status:', updateError)
     }
   }
+
+  // ===== FILE UPLOAD API =====
+  // Get signed upload URL for compliance documents
+  async getComplianceUploadUrl(params: {
+    mailboxId: string
+    documentType: 'id_front' | 'id_back' | 'address_proof'
+    fileName: string
+    contentType: string
+  }) {
+    const fileExt = params.fileName.split('.').pop() || 'jpg'
+    const filePath = `${params.mailboxId}/${params.documentType}_${Date.now()}.${fileExt}`
+    
+    const { data, error } = await this.client
+      .storage
+      .from('compliance-documents')
+      .createSignedUploadUrl(filePath)
+    
+    if (error) throw error
+    return {
+      signedUrl: data.signedUrl,
+      filePath: data.path,
+    }
+  }
+
+  // Upload file directly to storage using signed URL
+  async uploadToSignedUrl(signedUrl: string, file: File) {
+    const response = await fetch(signedUrl, {
+      method: 'PUT',
+      body: file,
+      headers: {
+        'Content-Type': file.type,
+      },
+    })
+    
+    if (!response.ok) {
+      throw new Error(`Upload failed: ${response.statusText}`)
+    }
+  }
+
+  // Get signed download URL for viewing
+  async getComplianceDownloadUrl(filePath: string) {
+    const { data, error } = await this.client
+      .storage
+      .from('compliance-documents')
+      .createSignedUrl(filePath, 3600) // 1 hour expiry
+    
+    if (error) throw error
+    return data.signedUrl
+  }
+
+  // ===== COMPLIANCE DOCUMENT API =====
+  // Save compliance document record (stub - will be implemented when DB schema is ready)
+  async saveComplianceDocument(params: {
+    mailboxId: string
+    documentType: 'id_front' | 'id_back' | 'address_proof'
+    storagePath: string
+    fileName: string
+    metadata?: Record<string, unknown>
+  }) {
+    // Stub: Will save to compliance_documents table when created
+    // For now, just return success
+    console.log('Saving compliance document:', params)
+    return { success: true }
+  }
+
+  // Get compliance documents for a mailbox (stub)
+  async getComplianceDocuments(mailboxId: string) {
+    // Stub: Will fetch from compliance_documents table when created
+    return {
+      idFront: null,
+      idBack: null,
+      addressProof: null,
+    }
+  }
 }
 
 // Export singleton instance for browser

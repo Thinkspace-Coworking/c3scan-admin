@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
+import Image from 'next/image'
 import { 
   ChevronLeft,
   ShieldCheck,
@@ -10,8 +11,13 @@ import {
   Upload,
   FileText,
   CheckCircle,
-  Pen
+  Pen,
+  X,
+  Loader2,
+  AlertCircle,
+  Check
 } from 'lucide-react'
+import { api } from '@/lib/api'
 
 // Wizard steps definition
 const WIZARD_STEPS = [
@@ -260,41 +266,301 @@ function WelcomeStep({ onNext }: { onNext: () => void }) {
   )
 }
 
-// Step 2: Identity Verification (stub)
-function IdentityStep({ 
-  onNext, 
-  onBack, 
-  mailboxId 
-}: { 
+// Step 2: Identity Verification
+function IdentityStep({
+  onNext,
+  onBack,
+  mailboxId
+}: {
   onNext: () => void
   onBack: () => void
-  mailboxId: string 
+  mailboxId: string
 }) {
+  const [idType, setIdType] = useState<'drivers_license' | 'passport' | 'state_id'>('drivers_license')
+  const [frontFile, setFrontFile] = useState<File | null>(null)
+  const [frontPreview, setFrontPreview] = useState<string | null>(null)
+  const [frontPath, setFrontPath] = useState<string | null>(null)
+  const [backFile, setBackFile] = useState<File | null>(null)
+  const [backPreview, setBackPreview] = useState<string | null>(null)
+  const [backPath, setBackPath] = useState<string | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const frontInputRef = useRef<HTMLInputElement>(null)
+  const backInputRef = useRef<HTMLInputElement>(null)
+
+  const handleFileSelect = useCallback(async (
+    file: File,
+    side: 'front' | 'back'
+  ) => {
+    setError(null)
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      setError('Please upload an image file (JPG, PNG, or PDF)')
+      return
+    }
+
+    // Validate file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      setError('File size must be less than 10MB')
+      return
+    }
+
+    // Create preview
+    const previewUrl = URL.createObjectURL(file)
+    if (side === 'front') {
+      setFrontFile(file)
+      setFrontPreview(previewUrl)
+    } else {
+      setBackFile(file)
+      setBackPreview(previewUrl)
+    }
+
+    // Upload to storage
+    setIsUploading(true)
+    try {
+      const { signedUrl, filePath } = await api.getComplianceUploadUrl({
+        mailboxId,
+        documentType: side === 'front' ? 'id_front' : 'id_back',
+        fileName: file.name,
+        contentType: file.type,
+      })
+
+      await api.uploadToSignedUrl(signedUrl, file)
+
+      // Save document record (stub for now)
+      await api.saveComplianceDocument({
+        mailboxId,
+        documentType: side === 'front' ? 'id_front' : 'id_back',
+        storagePath: filePath,
+        fileName: file.name,
+        metadata: { idType },
+      })
+
+      if (side === 'front') {
+        setFrontPath(filePath)
+      } else {
+        setBackPath(filePath)
+      }
+    } catch (err) {
+      console.error('Upload error:', err)
+      setError(err instanceof Error ? err.message : 'Upload failed. Please try again.')
+      if (side === 'front') {
+        setFrontFile(null)
+        setFrontPreview(null)
+      } else {
+        setBackFile(null)
+        setBackPreview(null)
+      }
+    } finally {
+      setIsUploading(false)
+    }
+  }, [mailboxId, idType])
+
+  const handleDrop = useCallback((e: React.DragEvent, side: 'front' | 'back') => {
+    e.preventDefault()
+    const file = e.dataTransfer.files[0]
+    if (file) {
+      handleFileSelect(file, side)
+    }
+  }, [handleFileSelect])
+
+  const clearFile = useCallback((side: 'front' | 'back') => {
+    if (side === 'front') {
+      if (frontPreview) URL.revokeObjectURL(frontPreview)
+      setFrontFile(null)
+      setFrontPreview(null)
+      setFrontPath(null)
+    } else {
+      if (backPreview) URL.revokeObjectURL(backPreview)
+      setBackFile(null)
+      setBackPreview(null)
+      setBackPath(null)
+    }
+  }, [frontPreview, backPreview])
+
+  const canContinue = frontPath !== null && (idType === 'passport' || backPath !== null)
+
   return (
     <div>
       <h2 className="text-xl font-bold text-gray-900 mb-2">Identity Verification</h2>
       <p className="text-gray-500 mb-6">
         Upload a government-issued photo ID. This is required by USPS to verify your identity.
       </p>
-      
-      <div className="p-12 border-2 border-dashed border-gray-300 rounded-xl text-center">
-        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <Upload className="w-8 h-8 text-gray-400" />
+
+      {/* ID Type Selector */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-gray-700 mb-3">
+          Select ID Type <span className="text-red-500">*</span>
+        </label>
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { id: 'drivers_license', label: "Driver's License" },
+            { id: 'passport', label: 'Passport' },
+            { id: 'state_id', label: 'State ID' },
+          ].map((option) => (
+            <button
+              key={option.id}
+              onClick={() => setIdType(option.id as typeof idType)}
+              className={`p-3 border rounded-lg text-sm font-medium transition-colors ${
+                idType === option.id
+                  ? 'border-[#FFCC00] bg-[#FFCC00]/10 text-gray-900'
+                  : 'border-gray-200 text-gray-600 hover:border-gray-300'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
-        <p className="text-gray-600 mb-2">ID upload coming in next chunk</p>
-        <p className="text-sm text-gray-400">Step 2 of 6</p>
       </div>
-      
+
+      {/* Error Message */}
+      {error && (
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-red-700">{error}</p>
+        </div>
+      )}
+
+      {/* Front of ID Upload */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-gray-700 mb-3">
+          Front of ID <span className="text-red-500">*</span>
+        </label>
+        {frontPreview ? (
+          <div className="relative border rounded-xl overflow-hidden">
+            <div className="aspect-video relative">
+              <Image
+                src={frontPreview}
+                alt="Front of ID"
+                fill
+                className="object-contain bg-gray-50"
+              />
+            </div>
+            <div className="absolute top-2 right-2 flex gap-2">
+              <button
+                onClick={() => clearFile('front')}
+                className="p-2 bg-white rounded-lg shadow-md hover:bg-gray-100 transition-colors"
+                title="Remove"
+              >
+                <X className="w-4 h-4 text-gray-600" />
+              </button>
+            </div>
+            {frontPath && (
+              <div className="absolute bottom-2 left-2 flex items-center gap-2 px-3 py-1.5 bg-green-500 text-white rounded-full text-sm font-medium">
+                <Check className="w-4 h-4" />
+                Uploaded
+              </div>
+            )}
+          </div>
+        ) : (
+          <div
+            onClick={() => frontInputRef.current?.click()}
+            onDrop={(e) => handleDrop(e, 'front')}
+            onDragOver={(e) => e.preventDefault()}
+            className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-[#FFCC00] hover:bg-[#FFCC00]/5 transition-colors cursor-pointer"
+          >
+            <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              {isUploading ? (
+                <Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
+              ) : (
+                <Upload className="w-6 h-6 text-gray-400" />
+              )}
+            </div>
+            <p className="text-sm font-medium text-gray-900 mb-1">
+              {isUploading ? 'Uploading...' : 'Click or drag to upload'}
+            </p>
+            <p className="text-xs text-gray-500">
+              JPG, PNG, or PDF up to 10MB
+            </p>
+            <input
+              ref={frontInputRef}
+              type="file"
+              accept="image/*,application/pdf"
+              onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0], 'front')}
+              className="hidden"
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Back of ID Upload (not required for passport) */}
+      {idType !== 'passport' && (
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-gray-700 mb-3">
+            Back of ID <span className="text-red-500">*</span>
+          </label>
+          {backPreview ? (
+            <div className="relative border rounded-xl overflow-hidden">
+              <div className="aspect-video relative">
+                <Image
+                  src={backPreview}
+                  alt="Back of ID"
+                  fill
+                  className="object-contain bg-gray-50"
+                />
+              </div>
+              <div className="absolute top-2 right-2 flex gap-2">
+                <button
+                  onClick={() => clearFile('back')}
+                  className="p-2 bg-white rounded-lg shadow-md hover:bg-gray-100 transition-colors"
+                  title="Remove"
+                >
+                  <X className="w-4 h-4 text-gray-600" />
+                </button>
+              </div>
+              {backPath && (
+                <div className="absolute bottom-2 left-2 flex items-center gap-2 px-3 py-1.5 bg-green-500 text-white rounded-full text-sm font-medium">
+                  <Check className="w-4 h-4" />
+                  Uploaded
+                </div>
+              )}
+            </div>
+          ) : (
+            <div
+              onClick={() => backInputRef.current?.click()}
+              onDrop={(e) => handleDrop(e, 'back')}
+              onDragOver={(e) => e.preventDefault()}
+              className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-[#FFCC00] hover:bg-[#FFCC00]/5 transition-colors cursor-pointer"
+            >
+              <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                {isUploading ? (
+                  <Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
+                ) : (
+                  <Upload className="w-6 h-6 text-gray-400" />
+                )}
+              </div>
+              <p className="text-sm font-medium text-gray-900 mb-1">
+                {isUploading ? 'Uploading...' : 'Click or drag to upload'}
+              </p>
+              <p className="text-xs text-gray-500">
+                JPG, PNG, or PDF up to 10MB
+              </p>
+              <input
+                ref={backInputRef}
+                type="file"
+                accept="image/*,application/pdf"
+                onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0], 'back')}
+                className="hidden"
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex justify-between mt-6">
         <button
           onClick={onBack}
-          className="px-6 py-3 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors"
+          disabled={isUploading}
+          className="px-6 py-3 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
         >
           Back
         </button>
         <button
           onClick={onNext}
-          className="px-6 py-3 bg-[#FFCC00] text-black font-medium rounded-lg hover:bg-[#E6B800] transition-colors"
+          disabled={!canContinue || isUploading}
+          className="px-6 py-3 bg-[#FFCC00] text-black font-medium rounded-lg hover:bg-[#E6B800] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Continue
         </button>
