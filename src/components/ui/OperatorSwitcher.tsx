@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useTenant } from '@/providers/tenant-provider'
 import { Building2, ChevronDown, Check, LogOut } from 'lucide-react'
@@ -98,6 +99,17 @@ export function OperatorSwitcher() {
                   )}
                 </button>
               ))}
+            </div>
+
+            {/* Portal Switch */}
+            <div className="border-t border-gray-200 py-1">
+              <Link
+                href="/app"
+                onClick={() => setIsOpen(false)}
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-gray-50 transition-colors text-gray-700"
+              >
+                <span className="text-sm font-medium">Switch to Customer Portal</span>
+              </Link>
             </div>
 
             {/* Footer Actions */}

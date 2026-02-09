@@ -124,6 +124,13 @@ export default function CustomerLayout({
                         >
                           Profile
                         </Link>
+                        <Link
+                          href="/admin"
+                          className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                          onClick={() => setShowUserMenu(false)}
+                        >
+                          Switch to Admin Portal
+                        </Link>
                         <button
                           onClick={() => {
                             setShowUserMenu(false)
