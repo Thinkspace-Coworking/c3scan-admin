@@ -9,9 +9,17 @@ async function getEasyPostApiKey(): Promise<string | null> {
   const supabase = await createClient()
   
   // Get current user
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-  if (userError || !user) {
-    throw new Error('Not authenticated')
+  let user = null
+  try {
+    const { data } = await supabase.auth.getUser()
+    user = data.user
+  } catch (error) {
+    // AuthSessionMissingError is expected for unauthenticated users
+    return null
+  }
+  
+  if (!user) {
+    return null
   }
 
   // Get operator_id for the user

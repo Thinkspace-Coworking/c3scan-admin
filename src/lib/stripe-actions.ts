@@ -7,8 +7,16 @@ export async function createSetupIntent() {
     const supabase = await createClient()
     
     // Get current user
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    if (userError || !user) {
+    let user = null
+    try {
+      const { data } = await supabase.auth.getUser()
+      user = data.user
+    } catch (error) {
+      // AuthSessionMissingError is expected for unauthenticated users
+      throw new Error('Not authenticated')
+    }
+    
+    if (!user) {
       throw new Error('Not authenticated')
     }
 
@@ -64,8 +72,16 @@ export async function savePaymentMethod(paymentMethodId: string) {
     const supabase = await createClient()
     
     // Get current user
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    if (userError || !user) {
+    let user = null
+    try {
+      const { data } = await supabase.auth.getUser()
+      user = data.user
+    } catch (error) {
+      // AuthSessionMissingError is expected for unauthenticated users
+      throw new Error('Not authenticated')
+    }
+    
+    if (!user) {
       throw new Error('Not authenticated')
     }
 
