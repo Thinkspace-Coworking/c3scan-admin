@@ -569,41 +569,344 @@ function IdentityStep({
   )
 }
 
-// Step 3: Proof of Address (stub)
-function AddressStep({ 
-  onNext, 
-  onBack, 
-  mailboxId 
-}: { 
+// Step 3: Proof of Address
+function AddressStep({
+  onNext,
+  onBack,
+  mailboxId
+}: {
   onNext: () => void
   onBack: () => void
-  mailboxId: string 
+  mailboxId: string
 }) {
+  const [docType, setDocType] = useState<'utility' | 'bank' | 'lease' | 'government'>('utility')
+  const [file, setFile] = useState<File | null>(null)
+  const [preview, setPreview] = useState<string | null>(null)
+  const [filePath, setFilePath] = useState<string | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Address fields
+  const [addressLine1, setAddressLine1] = useState('')
+  const [addressLine2, setAddressLine2] = useState('')
+  const [city, setCity] = useState('')
+  const [state, setState] = useState('')
+  const [zipCode, setZipCode] = useState('')
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleFileSelect = useCallback(async (selectedFile: File) => {
+    setError(null)
+
+    if (!selectedFile.type.startsWith('image/') && selectedFile.type !== 'application/pdf') {
+      setError('Please upload an image file (JPG, PNG) or PDF')
+      return
+    }
+
+    if (selectedFile.size > 10 * 1024 * 1024) {
+      setError('File size must be less than 10MB')
+      return
+    }
+
+    const previewUrl = URL.createObjectURL(selectedFile)
+    setFile(selectedFile)
+    setPreview(previewUrl)
+
+    setIsUploading(true)
+    try {
+      const { signedUrl, filePath: path } = await api.getComplianceUploadUrl({
+        mailboxId,
+        documentType: 'address_proof',
+        fileName: selectedFile.name,
+        contentType: selectedFile.type,
+      })
+
+      await api.uploadToSignedUrl(signedUrl, selectedFile)
+
+      await api.saveComplianceDocument({
+        mailboxId,
+        documentType: 'address_proof',
+        storagePath: path,
+        fileName: selectedFile.name,
+        metadata: { docType, address: { addressLine1, city, state, zipCode } },
+      })
+
+      setFilePath(path)
+    } catch (err) {
+      console.error('Upload error:', err)
+      setError(err instanceof Error ? err.message : 'Upload failed. Please try again.')
+      setFile(null)
+      setPreview(null)
+    } finally {
+      setIsUploading(false)
+    }
+  }, [mailboxId, docType, addressLine1, city, state, zipCode])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    const droppedFile = e.dataTransfer.files[0]
+    if (droppedFile) {
+      handleFileSelect(droppedFile)
+    }
+  }, [handleFileSelect])
+
+  const clearFile = useCallback(() => {
+    if (preview) URL.revokeObjectURL(preview)
+    setFile(null)
+    setPreview(null)
+    setFilePath(null)
+  }, [preview])
+
+  const canContinue = filePath !== null &&
+    addressLine1.trim() !== '' &&
+    city.trim() !== '' &&
+    state.trim() !== '' &&
+    zipCode.trim() !== ''
+
   return (
     <div>
       <h2 className="text-xl font-bold text-gray-900 mb-2">Proof of Address</h2>
       <p className="text-gray-500 mb-6">
-        Upload a document showing your current address (must be dated within 90 days).
+        Upload a document showing your current address. Document must be dated within 90 days.
       </p>
-      
-      <div className="p-12 border-2 border-dashed border-gray-300 rounded-xl text-center">
-        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <Upload className="w-8 h-8 text-gray-400" />
+
+      {/* Document Type Selector */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-gray-700 mb-3">
+          Document Type <span className="text-red-500">*</span>
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          {[
+            { id: 'utility', label: 'Utility Bill' },
+            { id: 'bank', label: 'Bank Statement' },
+            { id: 'lease', label: 'Lease Agreement' },
+            { id: 'government', label: 'Government Letter' },
+          ].map((option) => (
+            <button
+              key={option.id}
+              onClick={() => setDocType(option.id as typeof docType)}
+              className={`p-3 border rounded-lg text-sm font-medium transition-colors text-left ${
+                docType === option.id
+                  ? 'border-[#FFCC00] bg-[#FFCC00]/10 text-gray-900'
+                  : 'border-gray-200 text-gray-600 hover:border-gray-300'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
-        <p className="text-gray-600 mb-2">Address proof upload coming in next chunk</p>
-        <p className="text-sm text-gray-400">Step 3 of 6</p>
       </div>
-      
+
+      {/* File Upload */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-gray-700 mb-3">
+          Upload Document <span className="text-red-500">*</span>
+        </label>
+
+        {error && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-red-700">{error}</p>
+          </div>
+        )}
+
+        {preview ? (
+          <div className="relative border rounded-xl overflow-hidden">
+            <div className="aspect-video relative">
+              {file?.type === 'application/pdf' ? (
+                <div className="w-full h-full flex items-center justify-center bg-gray-100">
+                  <FileText className="w-16 h-16 text-gray-400" />
+                </div>
+              ) : (
+                <Image
+                  src={preview}
+                  alt="Address proof document"
+                  fill
+                  className="object-contain bg-gray-50"
+                />
+              )}
+            </div>
+            <div className="absolute top-2 right-2">
+              <button
+                onClick={clearFile}
+                className="p-2 bg-white rounded-lg shadow-md hover:bg-gray-100 transition-colors"
+                title="Remove"
+              >
+                <X className="w-4 h-4 text-gray-600" />
+              </button>
+            </div>
+            {filePath && (
+              <div className="absolute bottom-2 left-2 flex items-center gap-2 px-3 py-1.5 bg-green-500 text-white rounded-full text-sm font-medium">
+                <Check className="w-4 h-4" />
+                Uploaded
+              </div>
+            )}
+          </div>
+        ) : (
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            onDrop={handleDrop}
+            onDragOver={(e) => e.preventDefault()}
+            className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-[#FFCC00] hover:bg-[#FFCC00]/5 transition-colors cursor-pointer"
+          >
+            <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              {isUploading ? (
+                <Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
+              ) : (
+                <Upload className="w-6 h-6 text-gray-400" />
+              )}
+            </div>
+            <p className="text-sm font-medium text-gray-900 mb-1">
+              {isUploading ? 'Uploading...' : 'Click or drag to upload'}
+            </p>
+            <p className="text-xs text-gray-500">
+              JPG, PNG, or PDF up to 10MB
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,application/pdf"
+              onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])}
+              className="hidden"
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Address Fields */}
+      <div className="mb-6 space-y-4">
+        <h3 className="text-sm font-medium text-gray-900">Address on Document</h3>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Address Line 1 <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            value={addressLine1}
+            onChange={(e) => setAddressLine1(e.target.value)}
+            placeholder="123 Main Street"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FFCC00] focus:border-transparent"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Address Line 2
+          </label>
+          <input
+            type="text"
+            value={addressLine2}
+            onChange={(e) => setAddressLine2(e.target.value)}
+            placeholder="Apt 4B (optional)"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FFCC00] focus:border-transparent"
+          />
+        </div>
+
+        <div className="grid grid-cols-3 gap-4">
+          <div className="col-span-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              City <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+              placeholder="Seattle"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FFCC00] focus:border-transparent"
+            />
+          </div>
+
+          <div className="col-span-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              State <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={state}
+              onChange={(e) => setState(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FFCC00] focus:border-transparent bg-white"
+            >
+              <option value="">Select...</option>
+              <option value="AL">Alabama</option>
+              <option value="AK">Alaska</option>
+              <option value="AZ">Arizona</option>
+              <option value="AR">Arkansas</option>
+              <option value="CA">California</option>
+              <option value="CO">Colorado</option>
+              <option value="CT">Connecticut</option>
+              <option value="DE">Delaware</option>
+              <option value="FL">Florida</option>
+              <option value="GA">Georgia</option>
+              <option value="HI">Hawaii</option>
+              <option value="ID">Idaho</option>
+              <option value="IL">Illinois</option>
+              <option value="IN">Indiana</option>
+              <option value="IA">Iowa</option>
+              <option value="KS">Kansas</option>
+              <option value="KY">Kentucky</option>
+              <option value="LA">Louisiana</option>
+              <option value="ME">Maine</option>
+              <option value="MD">Maryland</option>
+              <option value="MA">Massachusetts</option>
+              <option value="MI">Michigan</option>
+              <option value="MN">Minnesota</option>
+              <option value="MS">Mississippi</option>
+              <option value="MO">Missouri</option>
+              <option value="MT">Montana</option>
+              <option value="NE">Nebraska</option>
+              <option value="NV">Nevada</option>
+              <option value="NH">New Hampshire</option>
+              <option value="NJ">New Jersey</option>
+              <option value="NM">New Mexico</option>
+              <option value="NY">New York</option>
+              <option value="NC">North Carolina</option>
+              <option value="ND">North Dakota</option>
+              <option value="OH">Ohio</option>
+              <option value="OK">Oklahoma</option>
+              <option value="OR">Oregon</option>
+              <option value="PA">Pennsylvania</option>
+              <option value="RI">Rhode Island</option>
+              <option value="SC">South Carolina</option>
+              <option value="SD">South Dakota</option>
+              <option value="TN">Tennessee</option>
+              <option value="TX">Texas</option>
+              <option value="UT">Utah</option>
+              <option value="VT">Vermont</option>
+              <option value="VA">Virginia</option>
+              <option value="WA">Washington</option>
+              <option value="WV">West Virginia</option>
+              <option value="WI">Wisconsin</option>
+              <option value="WY">Wyoming</option>
+            </select>
+          </div>
+
+          <div className="col-span-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              ZIP Code <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={zipCode}
+              onChange={(e) => setZipCode(e.target.value)}
+              placeholder="98101"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FFCC00] focus:border-transparent"
+            />
+          </div>
+        </div>
+      </div>
+
       <div className="flex justify-between mt-6">
         <button
           onClick={onBack}
-          className="px-6 py-3 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors"
+          disabled={isUploading}
+          className="px-6 py-3 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
         >
           Back
         </button>
         <button
           onClick={onNext}
-          className="px-6 py-3 bg-[#FFCC00] text-black font-medium rounded-lg hover:bg-[#E6B800] transition-colors"
+          disabled={!canContinue || isUploading}
+          className="px-6 py-3 bg-[#FFCC00] text-black font-medium rounded-lg hover:bg-[#E6B800] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Continue
         </button>
