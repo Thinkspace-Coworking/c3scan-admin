@@ -1223,31 +1223,208 @@ function AdditionalInfoStep({
   )
 }
 
-// Step 5: Review (stub)
-function ReviewStep({ 
-  onNext, 
-  onBack, 
-  mailboxId 
-}: { 
+// Step 5: Review
+function ReviewStep({
+  onNext,
+  onBack,
+  mailboxId
+}: {
   onNext: () => void
   onBack: () => void
-  mailboxId: string 
+  mailboxId: string
 }) {
+  const [isConfirmed, setIsConfirmed] = useState(false)
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['identity', 'address', 'additional']))
+
+  const router = useRouter()
+
+  const toggleSection = (section: string) => {
+    const newExpanded = new Set(expandedSections)
+    if (newExpanded.has(section)) {
+      newExpanded.delete(section)
+    } else {
+      newExpanded.add(section)
+    }
+    setExpandedSections(newExpanded)
+  }
+
+  const goToStep = (stepIndex: number) => {
+    router.push(`/app/${mailboxId}/compliance/assistant?step=${stepIndex}`)
+  }
+
+  // Review Section Card Component
+  const ReviewCard = ({
+    title,
+    stepIndex,
+    sectionKey,
+    children,
+    isComplete = true
+  }: {
+    title: string
+    stepIndex: number
+    sectionKey: string
+    children: React.ReactNode
+    isComplete?: boolean
+  }) => (
+    <div className="border border-gray-200 rounded-xl overflow-hidden mb-4">
+      <button
+        onClick={() => toggleSection(sectionKey)}
+        className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+            isComplete ? 'bg-green-500 text-white' : 'bg-yellow-500 text-white'
+          }`}>
+            {isComplete ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+          </div>
+          <span className="font-medium text-gray-900">{title}</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              goToStep(stepIndex)
+            }}
+            className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+          >
+            Edit
+          </button>
+          <ChevronLeft className={`w-5 h-5 text-gray-400 transition-transform ${
+            expandedSections.has(sectionKey) ? '-rotate-90' : 'rotate-180'
+          }`} />
+        </div>
+      </button>
+      {expandedSections.has(sectionKey) && (
+        <div className="p-4 bg-white">
+          {children}
+        </div>
+      )}
+    </div>
+  )
+
   return (
     <div>
       <h2 className="text-xl font-bold text-gray-900 mb-2">Review Your Information</h2>
       <p className="text-gray-500 mb-6">
-        Please review all information before signing. You can go back to edit any section.
+        Please review all information before signing. Click Edit to make changes.
       </p>
-      
-      <div className="p-12 border-2 border-dashed border-gray-300 rounded-xl text-center">
-        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <CheckCircle className="w-8 h-8 text-gray-400" />
+
+      {/* Identity Verification Summary */}
+      <ReviewCard title="Identity Verification" stepIndex={1} sectionKey="identity">
+        <div className="space-y-3">
+          <div className="flex justify-between py-2 border-b border-gray-100">
+            <span className="text-gray-500">ID Type</span>
+            <span className="font-medium text-gray-900">Driver&apos;s License</span>
+          </div>
+          <div className="flex justify-between py-2 border-b border-gray-100">
+            <span className="text-gray-500">Front of ID</span>
+            <span className="flex items-center gap-2 text-green-600">
+              <Check className="w-4 h-4" />
+              <span className="text-sm font-medium">Uploaded</span>
+            </span>
+          </div>
+          <div className="flex justify-between py-2">
+            <span className="text-gray-500">Back of ID</span>
+            <span className="flex items-center gap-2 text-green-600">
+              <Check className="w-4 h-4" />
+              <span className="text-sm font-medium">Uploaded</span>
+            </span>
+          </div>
         </div>
-        <p className="text-gray-600 mb-2">Form 1583 review preview coming in next chunk</p>
-        <p className="text-sm text-gray-400">Step 5 of 6</p>
+      </ReviewCard>
+
+      {/* Proof of Address Summary */}
+      <ReviewCard title="Proof of Address" stepIndex={2} sectionKey="address">
+        <div className="space-y-3">
+          <div className="flex justify-between py-2 border-b border-gray-100">
+            <span className="text-gray-500">Document Type</span>
+            <span className="font-medium text-gray-900">Utility Bill</span>
+          </div>
+          <div className="flex justify-between py-2 border-b border-gray-100">
+            <span className="text-gray-500">Document</span>
+            <span className="flex items-center gap-2 text-green-600">
+              <Check className="w-4 h-4" />
+              <span className="text-sm font-medium">Uploaded</span>
+            </span>
+          </div>
+          <div className="pt-2">
+            <span className="text-gray-500 text-sm">Address on Document</span>
+            <div className="mt-1 p-3 bg-gray-50 rounded-lg">
+              <p className="font-medium text-gray-900">123 Main Street, Apt 4B</p>
+              <p className="text-gray-700">Seattle, WA 98101</p>
+            </div>
+          </div>
+        </div>
+      </ReviewCard>
+
+      {/* Additional Information Summary */}
+      <ReviewCard title="Additional Information" stepIndex={3} sectionKey="additional">
+        <div className="space-y-3">
+          <div className="flex justify-between py-2 border-b border-gray-100">
+            <span className="text-gray-500">Place of Registration</span>
+            <span className="font-medium text-gray-900">Seattle, WA</span>
+          </div>
+          <div className="flex justify-between py-2 border-b border-gray-100">
+            <span className="text-gray-500">Business Use</span>
+            <span className="font-medium text-gray-900">Yes</span>
+          </div>
+          <div className="flex justify-between py-2 border-b border-gray-100">
+            <span className="text-gray-500">Business Name</span>
+            <span className="font-medium text-gray-900">Acme Corporation LLC</span>
+          </div>
+          <div className="pt-2">
+            <span className="text-gray-500 text-sm">Renters</span>
+            <div className="mt-1 space-y-2">
+              <div className="p-3 bg-gray-50 rounded-lg flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-gray-900">John Doe</p>
+                  <p className="text-sm text-gray-500">john@example.com</p>
+                </div>
+              </div>
+              <div className="p-3 bg-gray-50 rounded-lg flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-gray-900">Jane Smith</p>
+                  <p className="text-sm text-gray-500">jane@example.com</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </ReviewCard>
+
+      {/* USPS Form 1583 Notice */}
+      <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+        <h4 className="font-medium text-blue-900 mb-2">USPS Form 1583</h4>
+        <p className="text-sm text-blue-700 mb-3">
+          By proceeding to sign, you authorize this Commercial Mail Receiving Agency (CMRA) 
+          to receive mail on your behalf in accordance with USPS regulations.
+        </p>
+        <a
+          href="https://about.usps.com/forms/ps1583.pdf"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm text-blue-600 hover:text-blue-700 font-medium inline-flex items-center gap-1"
+        >
+          View Official USPS Form 1583
+          <ChevronLeft className="w-4 h-4 rotate-180" />
+        </a>
       </div>
-      
+
+      {/* Confirmation Checkbox */}
+      <label className="flex items-start gap-3 p-4 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
+        <input
+          type="checkbox"
+          checked={isConfirmed}
+          onChange={(e) => setIsConfirmed(e.target.checked)}
+          className="w-5 h-5 mt-0.5 rounded border-gray-300 text-[#FFCC00] focus:ring-[#FFCC00]"
+        />
+        <span className="text-sm text-gray-700">
+          I confirm that all information provided is accurate and complete. I understand that 
+          providing false information may result in denial of service and possible legal action 
+          under federal law.
+        </span>
+      </label>
+
       <div className="flex justify-between mt-6">
         <button
           onClick={onBack}
@@ -1257,7 +1434,8 @@ function ReviewStep({
         </button>
         <button
           onClick={onNext}
-          className="px-6 py-3 bg-[#FFCC00] text-black font-medium rounded-lg hover:bg-[#E6B800] transition-colors"
+          disabled={!isConfirmed}
+          className="px-6 py-3 bg-[#FFCC00] text-black font-medium rounded-lg hover:bg-[#E6B800] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Continue to Sign
         </button>
