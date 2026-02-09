@@ -178,9 +178,12 @@ export default function CustomerCompliancePage() {
             <p className="text-gray-500 max-w-md mx-auto mb-6">
               The compliance assistant will guide you through each step of the USPS Form 1583 process.
             </p>
-            <button className="px-6 py-3 bg-[#FFCC00] text-black font-medium rounded-lg hover:bg-[#E6B800] transition-colors">
+            <Link
+              href={`/app/${mailboxId}/compliance/assistant?step=0`}
+              className="px-6 py-3 bg-[#FFCC00] text-black font-medium rounded-lg hover:bg-[#E6B800] transition-colors inline-block"
+            >
               Start Compliance Wizard
-            </button>
+            </Link>
           </div>
         </div>
       )}
