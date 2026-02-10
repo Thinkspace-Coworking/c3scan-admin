@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import jwt from 'jsonwebtoken'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
+
+const JWT_SECRET = process.env.JWT_SECRET || process.env.SUPABASE_JWT_SECRET!
 
 /**
  * POST /api/mobile/v1/auth/google
@@ -102,25 +105,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Generate JWT for the user
-    const { data: sessionData, error: sessionError } = await supabase.auth.admin.createUser({
-      email,
-      user_metadata: {
-        operator_id: operator.operator_id,
-        locations: locations || [],
-      },
-    })
-
-    // Create a session token
-    const { data: jwtData, error: jwtError } = await supabase.auth.admin.generateLink({
-      type: 'magiclink',
-      email,
-      options: {
-        redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/mobile/auth/callback`,
-      },
-    })
-
-    // For now, create a simple JWT payload
+    // Generate signed JWT
     const tokenPayload = {
       sub: userId,
       email,
@@ -129,11 +114,16 @@ export async function POST(request: NextRequest) {
       exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60), // 24 hours
     }
 
-    // Note: In production, use a proper JWT library with signing
-    const accessToken = Buffer.from(JSON.stringify(tokenPayload)).toString('base64')
+    const accessToken = jwt.sign(tokenPayload, JWT_SECRET, { algorithm: 'HS256' })
+    const refreshToken = jwt.sign(
+      { sub: userId, type: 'refresh', iat: Math.floor(Date.now() / 1000) },
+      JWT_SECRET,
+      { algorithm: 'HS256', expiresIn: '7d' }
+    )
 
     return NextResponse.json({
       access_token: accessToken,
+      refresh_token: refreshToken,
       token_type: 'Bearer',
       expires_in: 86400,
       user: {
@@ -147,7 +137,7 @@ export async function POST(request: NextRequest) {
         email_domain: operator.email_domain,
       },
       locations: locations || [],
-      biometric_enabled: true, // iOS can enable Face ID/Touch ID
+      biometric_enabled: true,
     })
 
   } catch (error) {
