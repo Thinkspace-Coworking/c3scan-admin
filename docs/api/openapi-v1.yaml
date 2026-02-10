@@ -1,0 +1,1141 @@
+openapi: 3.0.3
+info:
+  title: C3scan Mobile API
+  description: |
+    API contract for GoPostal iOS Scanner app.
+
+    **⚠️ EMPLOYEE-ONLY:** This API is for mailroom staff scanning mail.
+    Customers/members use the webapp at c3scan.thinkspace.com
+
+    Authentication: Google OAuth (employees) + Biometric unlock support
+    
+    **Version History:**
+    - v1.0.0: Initial spec with full alias sync, Google OAuth, Supabase Storage
+  version: 1.0.0
+  contact:
+    name: C3scan Engineering
+
+servers:
+  - url: https://c3scan.io/api/mobile/v1
+    description: Production
+  - url: http://localhost:3000/api/mobile/v1
+    description: Local Development
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ============================================================================
+  # Authentication (Google OAuth for Employees)
+  # ============================================================================
+  /auth/google:
+    post:
+      summary: Google OAuth authentication for employee scanner app
+      description: |
+        Employee-only endpoint. Verifies Google ID token, extracts email,
+        resolves operator via email domain, returns C3scan JWT.
+        
+        iOS Flow:
+        1. Sign in with Google SDK → get id_token
+        2. POST to this endpoint with id_token
+        3. Receive C3scan JWT + operator info
+        4. Store JWT in Keychain, enable optional biometric unlock
+      tags:
+        - Authentication
+      security: []  # Public endpoint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - id_token
+                - device_info
+              properties:
+                id_token:
+                  type: string
+                  description: Google OIDC ID token from iOS SDK
+                  example: eyJhbGciOiJSUzI1NiIsImtpZCI6IjE2In0...
+                device_info:
+                  type: object
+                  description: Device identification for audit logs
+                  properties:
+                    device_id:
+                      type: string
+                      example: iOS_ABC123XYZ
+                    device_name:
+                      type: string
+                      example: "Peter's iPhone"
+                    os_version:
+                      type: string
+                      example: iOS 18.2
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                    description: C3scan JWT for API calls
+                    example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                  token_type:
+                    type: string
+                    example: Bearer
+                  expires_in:
+                    type: integer
+                    example: 86400
+                  refresh_token:
+                    type: string
+                    description: For token refresh without re-auth
+                  user:
+                    type: object
+                    properties:
+                      email:
+                        type: string
+                        example: peter@thinkspace.com
+                      name:
+                        type: string
+                        example: Peter Chee
+                      picture:
+                        type: string
+                        format: uri
+                  operator:
+                    $ref: '#/components/schemas/Operator'
+                  locations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Location'
+                  biometric_enabled:
+                    type: boolean
+                    description: Whether biometric unlock is available
+                    example: true
+        '401':
+          description: Invalid Google token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Email domain not authorized (no matching operator)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403-employee':
+          description: User not authorized as employee for this operator
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/refresh:
+    post:
+      summary: Refresh access token
+      description: |
+        Get new access token using refresh_token. Called when
+        biometric unlock happens or token is near expiry.
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refresh_token
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        '200':
+          description: New tokens issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  expires_in:
+                    type: integer
+        '401':
+          description: Invalid refresh token
+
+  /auth/logout:
+    post:
+      summary: Sign out (revoke token)
+      description: |
+        Revokes refresh token. iOS app should also clear Keychain.
+      tags:
+        - Authentication
+      responses:
+        '200':
+          description: Logout successful
+
+  # ============================================================================
+  # Company Alias Sync (for local SQLite cache)
+  # ============================================================================
+  /aliases/sync:
+    get:
+      summary: Sync ALL company aliases for OCR matching
+      description: |
+        Returns ALL company aliases for the operator's locations.
+        iOS app stores these in local SQLite for offline fuzzy matching.
+        Uses alias_name_normalized for the 9-layer matching algorithm.
+        
+        **Note:** Full sync only (no incremental). Largest operators have 
+        ~10K records (~5-10MB response). iOS should download on first launch
+        and periodically refresh (e.g., daily or on app foreground).
+        
+        **Throttling:** Server may implement rate limiting (e.g., 1 request per 
+        minute per device). Returns 429 Too Many Requests if throttled.
+      tags:
+        - Aliases
+      parameters:
+        - name: operator_id
+          in: query
+          description: Operator UUID (from auth response)
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of all aliases for operator
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  aliases:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CompanyAlias'
+                    description: All company aliases for offline matching
+                  total_count:
+                    type: integer
+                    example: 1847
+        '429':
+          description: Rate limit exceeded (throttled)
+          headers:
+            Retry-After:
+              description: Seconds to wait before retry
+              schema:
+                type: integer
+                example: 60
+                    description: Total aliases returned (for progress UI)
+                  fetched_at:
+                    type: string
+                    format: date-time
+                    description: Timestamp of this fetch (for display only)
+        '403':
+          description: Operator access denied
+
+  /aliases/search:
+    get:
+      summary: Search aliases (API fallback - WILDCARD ONLY)
+      description: |
+        Real-time API search when local SQLite returns 0 results.
+        
+        **IMPORTANT:** This is WILDCARD search, NOT fuzzy matching.
+        Fuzzy matching is only used for OCR scanning (messy text).
+        Manual search uses exact substring matching.
+        
+        iOS app flow:
+        1. Query local SQLite with wildcard: `alias_name_normalized LIKE '%query%'`
+        2. If 0 results → call this API endpoint
+        3. Display results or prompt "Refresh cache in Settings"
+        
+        Searches alias_name_normalized with wildcard matching (case-insensitive).
+        Used by [SEARCH COMPANIES] button in scan results screen.
+      tags:
+        - Aliases
+      parameters:
+        - name: q
+          in: query
+          description: Search query (user-typed)
+          required: true
+          schema:
+            type: string
+            example: acme corp
+        - name: operator_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            maximum: 50
+      responses:
+        '200':
+          description: Search results from API
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AliasSearchResult'
+                  count:
+                    type: integer
+                    example: 15
+                    description: Number of results returned
+                  source:
+                    type: string
+                    enum: [api]
+                    example: api
+                  prompt_refresh:
+                    type: boolean
+                    example: false
+                    description: |
+                      If true, suggest user refresh cache in Settings.
+                      Set when API search also returns 0 results (new company not in system yet).
+
+  # ============================================================================
+  # Mail Upload (Matched) - Via Staging Table
+  # ============================================================================
+  /mail:
+    post:
+      summary: Upload matched mail item (async staging)
+      description: |
+        Accepts mail scan data into staging table for async processing.
+        Returns immediately with staging_id - fast response for iOS app.
+        
+        Background worker handles:
+        - Validation (mailbox exists, belongs to operator)
+        - Duplicate detection (image hash, tracking number)
+        - Image processing
+        - Moving to mail_items table
+        
+        Flow: iOS Scan → Fuzzy Match → User clicks [MATCH] → POST /mail
+              → Insert to mail_item_staging → Return staging_id (fast)
+              → Background worker validates → Move to mail_items
+      tags:
+        - Mail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailItemUpload'
+      responses:
+        '202':
+          description: Upload accepted into staging (async processing)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  staging_id:
+                    type: string
+                    format: uuid
+                    description: Reference to track this upload in staging table
+                  status:
+                    type: string
+                    enum: [accepted]
+                    example: accepted
+                  message:
+                    type: string
+                    example: Upload received, processing in background
+                  accepted_at:
+                    type: string
+                    format: date-time
+        '400':
+          description: Invalid request (missing required fields)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Payload too large (image reference or metadata too big)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    # ============================================================================
+    # Batch upload for offline queue
+    # ============================================================================
+  /mail/batch:
+    post:
+      summary: Batch upload mail items (individual inserts)
+      description: |
+        Upload multiple mail items from the upload queue.
+        Used when iOS app comes back online after being offline.
+        
+        **Individual Inserts:** Each item is processed separately. Some may
+        succeed while others fail. Failed items are flagged for admin review.
+        
+        **Error Handling:**
+        - Valid items → Inserted to mail_item_staging, return staging_id
+        - Invalid items → Rejected immediately with error details
+        - All results returned to iOS for queue cleanup
+        - Failed items visible in Admin Tool for manual handling
+      tags:
+        - Mail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - items
+              properties:
+                items:
+                  type: array
+                  maxItems: 50
+                  items:
+                    type: object
+                    allOf:
+                      - $ref: '#/components/schemas/MailItemUpload'
+                      - type: object
+                        properties:
+                          client_id:
+                            type: string
+                            description: iOS-generated ID to track this item in batch
+                            example: queue_item_123
+      responses:
+        '207':
+          description: Multi-Status - Some succeeded, some failed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  summary:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                        example: 50
+                      accepted:
+                        type: integer
+                        example: 47
+                      rejected:
+                        type: integer
+                        example: 3
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        client_id:
+                          type: string
+                          description: Matches the client_id from request
+                        status:
+                          type: string
+                          enum: [accepted, rejected]
+                          example: accepted
+                        staging_id:
+                          type: string
+                          format: uuid
+                          description: Set if status is 'accepted'
+                        error:
+                          type: string
+                          description: Set if status is 'rejected'
+                        error_code:
+                          type: string
+                          enum: [INVALID_MAILBOX, MISSING_IMAGE, PAYLOAD_TOO_LARGE, RATE_LIMITED]
+                          description: Machine-readable error code for admin handling
+        '400':
+          description: Invalid request (entire batch malformed)
+        '413':
+          description: Batch payload too large
+
+  # ============================================================================
+  # Alias Suggestions (Unmatched → Admin Review → Approval)
+  # ============================================================================
+  /alias-suggestions:
+    post:
+      summary: Submit alias suggestion for admin review
+      description: |
+        When OCR finds no confident match, user can submit a new alias 
+        for admin review (via "ADD ALIAS" button in scan results).
+        
+        **Admin Approval Flow:**
+        1. iOS submits to alias_suggestions table (status: pending_review)
+        2. Admin reviews in webapp (sees envelope image, suggested name)
+        3. Admin APPROVES → System:
+           - Creates new company_alias record
+           - Creates mail_item record linked to the new alias
+           - Updates suggestion status to approved
+        4. Admin REJECTS → Updates suggestion status to rejected
+        
+        **Note:** Direct insert to alias_suggestions (no staging table needed 
+        since admin review is already the slow/async path).
+      tags:
+        - Suggestions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AliasSuggestionUpload'
+      responses:
+        '201':
+          description: Suggestion created for admin review
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  suggestion_id:
+                    type: string
+                    format: uuid
+                    description: Reference for tracking this suggestion
+                  status:
+                    type: string
+                    enum: [pending_review]
+                    example: pending_review
+                  message:
+                    type: string
+                    example: Alias suggestion submitted for admin review
+                  submitted_at:
+                    type: string
+                    format: date-time
+                  status:
+                    type: string
+                    example: pending_review
+                  created_at:
+                    type: string
+                    format: date-time
+
+  # ============================================================================
+  # Image Upload (Signed URLs)
+  # ============================================================================
+  /images/upload-url:
+    post:
+      summary: Get signed URL for Supabase Storage upload
+      description: |
+        Returns a presigned URL for direct upload to Supabase Storage bucket 'mail-items'.
+        Client uploads image bytes directly to Supabase, then calls /mail or 
+        /alias-suggestions with the storage_path.
+        
+        Flow: POST /images/upload-url → Get signed URL → PUT image to Supabase → 
+              Get storage_path → POST /mail with storage_path
+        
+        **Image Requirements:**
+        - Format: JPEG only (image/jpeg)
+        - Max size: 5MB (configurable per operator)
+        - Expiration: Configurable (default 60 seconds, max 300 seconds)
+      tags:
+        - Images
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - content_type
+                - operator_id
+              properties:
+                content_type:
+                  type: string
+                  enum: [image/jpeg]
+                  description: Image format (JPEG only)
+                  example: image/jpeg
+                filename:
+                  type: string
+                  example: scan_20260210_160000.jpg
+                operator_id:
+                  type: string
+                  format: uuid
+                  description: Used for path scoping in storage bucket
+                requested_expiry_seconds:
+                  type: integer
+                  description: Preferred URL expiration time (server may override)
+                  minimum: 30
+                  maximum: 300
+                  default: 60
+                  example: 60
+      responses:
+        '200':
+          description: Signed URL generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  upload_url:
+                    type: string
+                    format: uri
+                    description: Supabase Storage signed URL (PUT)
+                    example: https://xxxxx.supabase.co/storage/v1/object/sign/mail-items/operator_uuid/2026/02/10/scan_abc123.jpg?token=...
+                  storage_path:
+                    type: string
+                    description: Path to store in database (mail_items.image_path)
+                    example: operator_uuid/2026/02/10/scan_abc123.jpg
+                  expires_in:
+                    type: integer
+                    description: Actual expiration time (may differ from requested)
+                    example: 60
+                  max_file_size:
+                    type: integer
+                    description: Maximum allowed file size in bytes
+                    example: 5242880
+        '400':
+          description: Invalid request (wrong content type or expiry too long)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ============================================================================
+  # Location Management
+  # ============================================================================
+  /locations:
+    get:
+      summary: List locations for operator
+      description: |
+        Returns all locations where the authenticated user
+        has Location Staff access. Used for location selector.
+      tags:
+        - Locations
+      parameters:
+        - name: operator_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of locations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  locations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Location'
+
+  # ============================================================================
+  # Version Check (App Update Notification)
+  # ============================================================================
+  /version:
+    get:
+      summary: Get latest app version info
+      description: |
+        Returns current app version info. iOS app checks this on launch
+        and warns user if their version is outdated.
+        
+        Does not block scanning — just informational warning.
+      tags:
+        - Version
+      security: []  # Public endpoint
+      responses:
+        '200':
+          description: Version info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  latest_version:
+                    type: string
+                    example: "3.0.1"
+                  latest_build:
+                    type: string
+                    example: "3.0.0.1"
+                  minimum_supported_version:
+                    type: string
+                    example: "2.5.0"
+                  release_notes:
+                    type: string
+                    example: "Bug fixes and performance improvements"
+                  update_url:
+                    type: string
+                    format: uri
+                    description: App Store URL for update
+                    example: "https://apps.apple.com/app/id123456789"
+                  force_update:
+                    type: boolean
+                    default: false
+                    description: If true, strongly recommend update (rarely used)
+
+  # ============================================================================
+  # Stats (Employee Scanner Dashboard)
+  # ============================================================================
+  /stats:
+    get:
+      summary: Get comprehensive scanner stats for employee dashboard
+      description: |
+        Returns scanning statistics for the authenticated employee.
+        Includes period-based summaries (today/week/month) and detailed metrics.
+        Used for iOS dashboard and personal performance tracking.
+        
+        **Note:** Period-based counts (month/year) are calculated from 
+        mail_item_staging records and mail_items for historical reporting.
+      tags:
+        - Stats
+      parameters:
+        - name: operator_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: period
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [today, week, month, year]
+            default: today
+          description: Primary period to highlight (affects summary stats)
+      responses:
+        '200':
+          description: Comprehensive stats for employee dashboard
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  employee:
+                    type: object
+                    properties:
+                      email:
+                        type: string
+                        example: peter@thinkspace.com
+                      name:
+                        type: string
+                        example: Peter Chee
+                  summary:
+                    type: object
+                    description: Quick stats for dashboard header
+                    properties:
+                      today:
+                        type: object
+                        properties:
+                          total_scanned:
+                            type: integer
+                            example: 47
+                          matched:
+                            type: integer
+                            example: 42
+                          unmatched:
+                            type: integer
+                            example: 5
+                          match_rate_percent:
+                            type: number
+                            example: 89.4
+                      this_week:
+                        type: object
+                        properties:
+                          total_scanned:
+                            type: integer
+                            example: 312
+                          matched:
+                            type: integer
+                            example: 285
+                          unmatched:
+                            type: integer
+                            example: 27
+                          match_rate_percent:
+                            type: number
+                            example: 91.3
+                      this_month:
+                        type: object
+                        properties:
+                          total_scanned:
+                            type: integer
+                            example: 1247
+                          matched:
+                            type: integer
+                            example: 1156
+                          unmatched:
+                            type: integer
+                            example: 91
+                          match_rate_percent:
+                            type: number
+                            example: 92.7
+                  details:
+                    type: object
+                    description: Detailed metrics for data enthusiasts
+                    properties:
+                      average_ocr_confidence:
+                        type: number
+                        description: Average OCR confidence score (0-1)
+                        example: 0.87
+                      top_locations:
+                        type: array
+                        description: Scan count by location
+                        items:
+                          type: object
+                          properties:
+                            location_name:
+                              type: string
+                              example: Thinkspace Seattle
+                            scan_count:
+                              type: integer
+                              example: 28
+                      top_matched_companies:
+                        type: array
+                        description: Most frequently matched companies
+                        items:
+                          type: object
+                          properties:
+                            company_name:
+                              type: string
+                              example: Acme Corp
+                            match_count:
+                              type: integer
+                              example: 15
+                      hourly_distribution:
+                        type: array
+                        description: Scans per hour (for today view)
+                        items:
+                          type: object
+                          properties:
+                            hour:
+                              type: integer
+                              example: 14
+                            count:
+                              type: integer
+                              example: 8
+                  streaks:
+                    type: object
+                    description: Gamification / motivation
+                    properties:
+                      current_day_streak:
+                        type: integer
+                        description: Consecutive days with scans
+                        example: 5
+                      longest_day_streak:
+                        type: integer
+                        example: 12
+                      personal_best_daily:
+                        type: integer
+                        description: Most scans in a single day
+                        example: 89
+
+# ==============================================================================
+# Components
+# ==============================================================================
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    # ----------------------------------------------------------------------------
+    # Core Entities
+    # ----------------------------------------------------------------------------
+    Operator:
+      type: object
+      properties:
+        operator_id:
+          type: string
+          format: uuid
+        operator_name:
+          type: string
+          example: Thinkspace
+        email_domain:
+          type: string
+          example: thinkspace.com
+        logo_url:
+          type: string
+          format: uri
+
+    Location:
+      type: object
+      description: Location with GPS coordinates for geo-fencing
+      properties:
+        location_id:
+          type: string
+          format: uuid
+        location_name:
+          type: string
+          example: Thinkspace Seattle
+        address:
+          type: object
+          properties:
+            street:
+              type: string
+              example: "1416 NW 46th St"
+            city:
+              type: string
+              example: "Seattle"
+            state:
+              type: string
+              example: "WA"
+            postal_code:
+              type: string
+              example: "98107"
+        coordinates:
+          type: object
+          description: GPS coordinates for geo-fencing location detection
+          properties:
+            latitude:
+              type: number
+              format: decimal
+              example: 47.6062
+            longitude:
+              type: number
+              format: decimal
+              example: -122.3321
+
+    CompanyAlias:
+      type: object
+      description: |
+        Company alias record for local SQLite cache.
+        alias_name_normalized is the key field for fuzzy matching.
+      properties:
+        company_id:
+          type: string
+          format: uuid
+        alias_name:
+          type: string
+          example: Acme Corporation
+        alias_name_normalized:
+          type: string
+          description: Lowercase, stripped punctuation for fuzzy matching
+          example: acme corporation
+        alias_type:
+          type: string
+          enum: [authorized_member, dba, ocr_variant]
+          example: dba
+        mailbox_id:
+          type: string
+          format: uuid
+        mailbox_pmb:
+          type: string
+          example: "101"
+        mailbox_name:
+          type: string
+          example: Acme Corp Mailbox
+        location_id:
+          type: string
+          format: uuid
+        location_name:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+
+    AliasSearchResult:
+      type: object
+      properties:
+        mailbox_id:
+          type: string
+          format: uuid
+        mailbox_pmb:
+          type: string
+          example: "101"
+        alias_name:
+          type: string
+          example: Acme Corporation
+        company_name:
+          type: string
+          example: Acme Corp LLC
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          example: 0.95
+
+    # ----------------------------------------------------------------------------
+    # Upload Payloads
+    # ----------------------------------------------------------------------------
+    MailItemUpload:
+      type: object
+      required:
+        - operator_id
+        - location_id
+        - mailbox_id
+        - scanned_by_email
+        - envelope_image
+        - ocr_raw_text
+        - scanned_at
+      properties:
+        # Required IDs
+        operator_id:
+          type: string
+          format: uuid
+        location_id:
+          type: string
+          format: uuid
+          description: Detected via geo-fencing or manual override
+        location_detected_by:
+          type: string
+          enum: [gps, manual]
+          default: gps
+          description: How location was determined (GPS auto-detect or manual selection)
+        mailbox_id:
+          type: string
+          format: uuid
+          description: The matched mailbox from fuzzy matching
+        
+        # Scanner info
+        scanned_by_email:
+          type: string
+          format: email
+          example: peter@thinkspace.com
+        scanned_by_user_id:
+          type: string
+          format: uuid
+        
+        # Image
+        envelope_image:
+          type: string
+          description: Either base64 data OR storage_path if using signed URLs
+          example: storage_path:mail/2026/02/10/uuid.jpg
+        
+        # OCR Results
+        ocr_raw_text:
+          type: string
+          example: ACME CORP STE 100
+        ocr_normalized_text:
+          type: string
+          example: acme corp ste 100
+        ocr_confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          example: 0.94
+        
+        # Match metadata
+        match_confidence:
+          type: number
+          format: float
+          description: Fuzzy match confidence score
+          example: 0.94
+        match_method:
+          type: string
+          enum: [fuzzy_ocr, manual_search, barcode]
+          example: fuzzy_ocr
+        
+        # Mail metadata (optional)
+        package_type:
+          type: string
+          enum: [correspondence, package]
+          default: correspondence
+        carrier:
+          type: string
+          enum: [USPS, UPS, FedEx, DHL, Other]
+        tracking_number:
+          type: string
+        
+        # Timestamps
+        scanned_at:
+          type: string
+          format: date-time
+        
+        # Client ID for deduplication
+        client_scan_id:
+          type: string
+          description: iOS-generated unique ID for this scan (deduplication)
+          example: scan_20260210_160000_abc123
+        
+        # Duplicate Detection (placeholder for future server-side implementation)
+        # Server-side process will detect near-duplicates by image_hash or tracking_number
+        image_hash:
+          type: string
+          description: |
+            Perceptual hash of image (e.g., pHash) for server-side duplicate detection.
+            Currently optional, stored for future near-duplicate matching.
+          example: a1b2c3d4e5f67890
+        
+        # Duplicate check bypass (for edge cases)
+        skip_duplicate_check:
+          type: boolean
+          description: |
+            If true, bypass server-side duplicate detection for this upload.
+            Use when employee confirms this is intentionally a re-scan.
+          default: false
+
+    AliasSuggestionUpload:
+      type: object
+      required:
+        - operator_id
+        - location_id
+        - scanned_by_email
+        - envelope_image
+        - ocr_raw_text
+        - scanned_at
+      properties:
+        operator_id:
+          type: string
+          format: uuid
+        location_id:
+          type: string
+          format: uuid
+          description: Detected via geo-fencing or manual override
+        location_detected_by:
+          type: string
+          enum: [gps, manual]
+          default: gps
+          description: How location was determined (GPS auto-detect or manual selection)
+        scanned_by_email:
+          type: string
+          format: email
+        scanned_by_user_id:
+          type: string
+          format: uuid
+        
+        # User's best guess (optional)
+        suggested_alias_name:
+          type: string
+          description: User-typed company name if they have a guess
+          example: Unknown Company Inc
+        suggested_mailbox_id:
+          type: string
+          format: uuid
+          description: If user manually found a match via search
+        
+        # Image
+        envelope_image:
+          type: string
+          description: Base64 or storage_path
+        
+        # OCR (low confidence)
+        ocr_raw_text:
+          type: string
+          example: UNKWN CO STE 500
+        ocr_confidence:
+          type: number
+          format: float
+          example: 0.45
+        
+        # Timestamps
+        scanned_at:
+          type: string
+          format: date-time
+        client_scan_id:
+          type: string
+
+    # ----------------------------------------------------------------------------
+    # Error
+    # ----------------------------------------------------------------------------
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: invalid_request
+        message:
+          type: string
+          example: Missing required field 'mailbox_id'
+        details:
+          type: object
+          additionalProperties: true
