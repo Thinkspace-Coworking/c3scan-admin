@@ -2,10 +2,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import jwt from 'jsonwebtoken'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+// Lazy initialization to avoid build-time errors
+const getSupabase = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  
+  if (!url || !key) {
+    throw new Error('Supabase credentials not configured')
+  }
+  
+  return createClient(url, key)
+}
 
 const JWT_SECRET = process.env.JWT_SECRET || process.env.SUPABASE_JWT_SECRET!
 
@@ -54,6 +61,8 @@ export async function POST(request: NextRequest) {
 
     // Extract domain and lookup operator
     const emailDomain = email.split('@')[1]
+    
+    const supabase = getSupabase()
     
     const { data: operator, error: operatorError } = await supabase
       .from('operator')
