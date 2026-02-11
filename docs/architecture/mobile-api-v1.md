@@ -153,7 +153,7 @@ CREATE TABLE upload_queue (
 
 ## Image Upload Flow (Supabase Storage)
 
-The iOS app uploads images directly to Supabase Storage bucket `mail-items`, not through the API:
+The iOS app uploads images directly to Supabase Storage bucket `mail-photos`, not through the API:
 
 ```
 1. POST /api/mobile/v1/images/upload-url
@@ -250,7 +250,7 @@ Body: {
   "operator_id": "uuid"
 }
 Response: {
-  "upload_url": "https://xxxx.supabase.co/storage/v1/object/sign/mail-items/...",
+  "upload_url": "https://xxxx.supabase.co/storage/v1/object/sign/mail-photos/...",
   "storage_path": "operator_uuid/2026/02/10/uuid.jpg",
   "expires_in": 300
 }
@@ -301,7 +301,7 @@ Response: { "suggestion_id": "uuid", "status": "pending_review" }
 | Question | Answer |
 |----------|--------|
 | Batch size limit | 50 default, configurable in iOS settings ✓ |
-| Image upload | Signed URLs to Supabase Storage bucket `mail-items` ✓ |
+| Image upload | Signed URLs to Supabase Storage bucket `mail-photos` ✓ |
 | Duplicate detection | Placeholder fields added. Server-side process TBD; employee handles near-duplicates manually for now ✓ |
 | `alias_suggestions` table | Already exists in Supabase ✓ |
 
