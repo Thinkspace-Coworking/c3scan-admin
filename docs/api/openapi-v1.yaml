@@ -1,0 +1,1367 @@
+openapi: 3.1.0
+info:
+  title: c3scan WebAPI
+  version: "1.0.0"
+  description: |
+    Operator-scoped WebAPI for c3scan. Tenancy is derived from request Host and enforced on every request.
+    v1 request types: forward_mail, open_scan. Compliance grace period: 30 days.
+servers:
+  - url: https://{operatorHost}
+    variables:
+      operatorHost:
+        default: c3scan.example.com
+        description: Operator-scoped host (e.g., c3scan.thinkspace.com)
+
+tags:
+  - name: Auth
+  - name: App
+  - name: Admin
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/auth/detect-provider:
+    get:
+      tags: [Auth]
+      summary: Detect operator auth provider and branding for the current Host
+      security: []
+      responses:
+        "200":
+          description: Operator branding and enabled auth providers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetectProviderResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/auth/oidc/{provider}:
+    get:
+      tags: [Auth]
+      summary: Start OIDC login (redirect)
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [google]
+      responses:
+        "302":
+          description: Redirect to provider authorization URL
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/auth/callback:
+    get:
+      tags: [Auth]
+      summary: OIDC callback (redirect)
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: { type: string }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "302":
+          description: Redirect back to app after setting refresh cookie
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token using refresh cookie
+      security: []
+      responses:
+        "200":
+          description: New access token issued and refresh cookie rotated
+          headers:
+            Set-Cookie:
+              description: Rotated refresh cookie (HttpOnly, Secure)
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefreshResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout (revoke refresh token and clear cookie)
+      security: []
+      responses:
+        "204":
+          description: Logged out
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/app/me:
+    get:
+      tags: [App]
+      summary: Get current user (member portal)
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppMeResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/app/mail-items:
+    get:
+      tags: [App]
+      summary: List mail items for member companies
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: archived
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: search
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: Mail items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppMailItemListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/app/mail-items/{mail_item_id}:
+    get:
+      tags: [App]
+      summary: Get mail item detail
+      parameters:
+        - $ref: "#/components/parameters/MailItemId"
+      responses:
+        "200":
+          description: Mail item detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppMailItemDetailResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/app/mail-items/{mail_item_id}/archive:
+    post:
+      tags: [App]
+      summary: Archive or unarchive a mail item
+      parameters:
+        - $ref: "#/components/parameters/MailItemId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [is_archived]
+              properties:
+                is_archived: { type: boolean }
+      responses:
+        "200":
+          description: Updated archive state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mail_item_id, is_archived]
+                properties:
+                  mail_item_id: { $ref: "#/components/schemas/Uuid" }
+                  is_archived: { type: boolean }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/app/requests:
+    get:
+      tags: [App]
+      summary: List customer requests
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/RequestStatus"
+        - name: type
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/RequestType"
+      responses:
+        "200":
+          description: Requests
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppRequestListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    post:
+      tags: [App]
+      summary: Create a customer request (forward_mail or open_scan)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAppRequest"
+      responses:
+        "201":
+          description: Request created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateRequestResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Restricted due to compliance or insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                restricted:
+                  value:
+                    error:
+                      code: forbidden
+                      message: Customer is restricted due to compliance; cannot submit new requests.
+                      details: { reason: restricted }
+                      request_id: "req_123"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Active request already exists for this mail item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                activeRequest:
+                  value:
+                    error:
+                      code: conflict_active_request
+                      message: An active request already exists for this mail item.
+                      details: { mail_item_id: "00000000-0000-0000-0000-000000000000" }
+                      request_id: "req_123"
+
+  /api/app/requests/{request_id}:
+    get:
+      tags: [App]
+      summary: Get request detail
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Request detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppRequestDetailResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/app/compliance:
+    get:
+      tags: [App]
+      summary: Get compliance status and grace countdown
+      responses:
+        "200":
+          description: Compliance status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppComplianceResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/app/compliance/documents/init:
+    post:
+      tags: [App]
+      summary: Initialize compliance document upload and receive signed upload URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InitComplianceDocumentRequest"
+      responses:
+        "200":
+          description: Upload initialized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InitComplianceDocumentResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/app/compliance/documents/{document_id}/complete:
+    post:
+      tags: [App]
+      summary: Mark compliance document upload as complete
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      responses:
+        "200":
+          description: Document marked complete
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [document_id, status]
+                properties:
+                  document_id: { $ref: "#/components/schemas/Uuid" }
+                  status:
+                    type: string
+                    enum: [uploaded]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/app/compliance/submit:
+    post:
+      tags: [App]
+      summary: Submit compliance package for review
+      responses:
+        "200":
+          description: Submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [compliance_status]
+                properties:
+                  compliance_status:
+                    $ref: "#/components/schemas/ComplianceStatus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/mail-items:
+    post:
+      tags: [Admin]
+      summary: Create mail item intake record (scanner workflow)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAdminMailItem"
+      responses:
+        "201":
+          description: Mail item created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mail_item_id]
+                properties:
+                  mail_item_id: { $ref: "#/components/schemas/Uuid" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    get:
+      tags: [Admin]
+      summary: List mail items (staff tooling)
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: location_id
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/Uuid" }
+        - name: mailbox_id
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/Uuid" }
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: has_open_request
+          in: query
+          required: false
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: Mail items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMailItemListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/mail-items/{mail_item_id}:
+    get:
+      tags: [Admin]
+      summary: Get mail item detail (staff tooling)
+      parameters:
+        - $ref: "#/components/parameters/MailItemId"
+      responses:
+        "200":
+          description: Mail item detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMailItemDetailResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/admin/mailboxes:
+    get:
+      tags: [Admin]
+      summary: List mailboxes with compliance status
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: location_id
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/Uuid" }
+        - name: compliance_status
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/ComplianceStatus" }
+      responses:
+        "200":
+          description: Mailboxes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMailboxListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    post:
+      tags: [Admin]
+      summary: Create mailbox and start compliance clock
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMailboxRequest"
+      responses:
+        "201":
+          description: Mailbox created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateMailboxResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/mailboxes/{mailbox_id}:
+    get:
+      tags: [Admin]
+      summary: Get mailbox detail
+      parameters:
+        - $ref: "#/components/parameters/MailboxId"
+      responses:
+        "200":
+          description: Mailbox detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMailboxDetailResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/admin/mailboxes/{mailbox_id}/invite:
+    post:
+      tags: [Admin]
+      summary: Invite mailbox manager (email)
+      parameters:
+        - $ref: "#/components/parameters/MailboxId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, full_name]
+              properties:
+                email: { type: string, format: email }
+                full_name: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: Invitation queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, enum: [sent] }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/admin/requests:
+    get:
+      tags: [Admin]
+      summary: List requests (queue)
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: status
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/RequestStatus" }
+        - name: type
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/RequestType" }
+        - name: location_id
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/Uuid" }
+      responses:
+        "200":
+          description: Requests
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRequestListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/requests/{request_id}:
+    get:
+      tags: [Admin]
+      summary: Get request detail
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Request detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRequestDetailResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/admin/requests/{request_id}/status:
+    post:
+      tags: [Admin]
+      summary: Update request status (and complete with required fields)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRequestStatusRequest"
+      responses:
+        "200":
+          description: Updated request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Request"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/admin/compliance:
+    get:
+      tags: [Admin]
+      summary: List compliance cases
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: status
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/ComplianceStatus" }
+        - name: location_id
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/Uuid" }
+      responses:
+        "200":
+          description: Compliance cases
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminComplianceListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/compliance/{mailbox_id}:
+    get:
+      tags: [Admin]
+      summary: Get compliance case for a mailbox
+      parameters:
+        - $ref: "#/components/parameters/MailboxId"
+      responses:
+        "200":
+          description: Compliance detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminComplianceDetailResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/admin/compliance/{mailbox_id}/approve:
+    post:
+      tags: [Admin]
+      summary: Approve compliance (operator_admin recommended)
+      parameters:
+        - $ref: "#/components/parameters/MailboxId"
+      responses:
+        "200":
+          description: Approved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [compliance_status]
+                properties:
+                  compliance_status:
+                    $ref: "#/components/schemas/ComplianceStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/admin/compliance/{mailbox_id}/reject:
+    post:
+      tags: [Admin]
+      summary: Reject compliance (operator_admin recommended)
+      parameters:
+        - $ref: "#/components/parameters/MailboxId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RejectComplianceRequest"
+      responses:
+        "200":
+          description: Rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [compliance_status]
+                properties:
+                  compliance_status:
+                    $ref: "#/components/schemas/ComplianceStatus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+    MailItemId:
+      name: mail_item_id
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Uuid" }
+    RequestId:
+      name: request_id
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Uuid" }
+    MailboxId:
+      name: mailbox_id
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Uuid" }
+    DocumentId:
+      name: document_id
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Uuid" }
+
+  responses:
+    BadRequest:
+      description: Bad Request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            validationFailed:
+              value:
+                error:
+                  code: validation_failed
+                  message: Validation failed.
+                  details: { field: "type" }
+                  request_id: "req_123"
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            unauthorized:
+              value:
+                error:
+                  code: unauthorized
+                  message: Missing or invalid access token.
+                  details: {}
+                  request_id: "req_123"
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            forbidden:
+              value:
+                error:
+                  code: forbidden
+                  message: Not allowed.
+                  details: {}
+                  request_id: "req_123"
+    NotFound:
+      description: Not Found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            notFound:
+              value:
+                error:
+                  code: not_found
+                  message: Not found.
+                  details: {}
+                  request_id: "req_123"
+
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+
+    DetectProviderResponse:
+      type: object
+      required: [operator, branding, enabled_auth_providers]
+      properties:
+        operator:
+          type: object
+          required: [operator_id, slug, name]
+          properties:
+            operator_id: { $ref: "#/components/schemas/Uuid" }
+            slug: { type: string }
+            name: { type: string }
+        branding:
+          type: object
+          required: [logo_url, primary_color]
+          properties:
+            logo_url: { type: string }
+            primary_color: { type: string }
+        enabled_auth_providers:
+          type: array
+          items:
+            type: object
+            required: [provider_type, authorization_url, client_id, scopes, pkce_required]
+            properties:
+              provider_type:
+                type: string
+                enum: [google]
+              authorization_url: { type: string }
+              client_id: { type: string }
+              scopes:
+                type: array
+                items: { type: string }
+              pkce_required: { type: boolean }
+
+    RefreshResponse:
+      type: object
+      required: [access_token, expires_in]
+      properties:
+        access_token: { type: string }
+        expires_in: { type: integer, example: 3600 }
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, details, request_id]
+          properties:
+            code:
+              type: string
+              enum:
+                - unauthorized
+                - forbidden
+                - not_found
+                - validation_failed
+                - conflict_active_request
+                - rate_limited
+                - server_error
+            message: { type: string }
+            details:
+              type: object
+              additionalProperties: true
+            request_id: { type: string }
+
+    Role:
+      type: string
+      enum:
+        - mailbox_manager
+        - member_user
+        - operator_staff
+        - operator_admin
+        - platform_admin
+
+    AppMeResponse:
+      type: object
+      required: [user, role, operator_id, company_ids]
+      properties:
+        user:
+          type: object
+          required: [user_id, email, full_name]
+          properties:
+            user_id: { $ref: "#/components/schemas/Uuid" }
+            email: { type: string, format: email }
+            full_name: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        operator_id: { $ref: "#/components/schemas/Uuid" }
+        company_ids:
+          type: array
+          items: { $ref: "#/components/schemas/Uuid" }
+
+    RequestType:
+      type: string
+      enum: [forward_mail, open_scan]
+
+    RequestStatus:
+      type: string
+      enum: [pending, in_progress, completed, canceled]
+
+    ComplianceStatus:
+      type: string
+      enum: [not_submitted, grace_period, pending_review, approved, rejected]
+
+    FileOwnerType:
+      type: string
+      enum: [mail_item_envelope, request_scan, request_label, compliance_doc]
+
+    FileRef:
+      type: object
+      required: [file_id, owner_type, content_type, size_bytes, created_at]
+      properties:
+        file_id: { $ref: "#/components/schemas/Uuid" }
+        owner_type: { $ref: "#/components/schemas/FileOwnerType" }
+        storage_key:
+          type: string
+          description: Internal storage key (not required to expose to clients)
+        content_type: { type: string }
+        size_bytes: { type: integer }
+        created_at: { type: string, format: date-time }
+        signed_url:
+          type: string
+          description: Time-limited signed URL when requested/allowed
+
+    MailItemSummary:
+      type: object
+      required:
+        - mail_item_id
+        - mailbox_id
+        - company_id
+        - location_id
+        - scanned_at
+        - status
+        - is_archived
+      properties:
+        mail_item_id: { $ref: "#/components/schemas/Uuid" }
+        mailbox_id: { $ref: "#/components/schemas/Uuid" }
+        company_id: { $ref: "#/components/schemas/Uuid" }
+        location_id: { $ref: "#/components/schemas/Uuid" }
+        scanned_at: { type: string, format: date-time }
+        status: { type: string }
+        is_archived: { type: boolean }
+        envelope_image:
+          allOf:
+            - $ref: "#/components/schemas/FileRef"
+        latest_request:
+          type: object
+          required: [request_id, type, status]
+          properties:
+            request_id: { $ref: "#/components/schemas/Uuid" }
+            type: { $ref: "#/components/schemas/RequestType" }
+            status: { $ref: "#/components/schemas/RequestStatus" }
+
+    AppMailItemListResponse:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/MailItemSummary" }
+        next_cursor:
+          type: ["string", "null"]
+
+    AppMailItemDetailResponse:
+      type: object
+      required: [item]
+      properties:
+        item: { $ref: "#/components/schemas/MailItemSummary" }
+
+    Address:
+      type: object
+      required: [name, line1, city, region, postal_code, country]
+      properties:
+        name: { type: string }
+        line1: { type: string }
+        line2: { type: string }
+        city: { type: string }
+        region: { type: string }
+        postal_code: { type: string }
+        country: { type: string }
+
+    ForwardDestination:
+      type: object
+      properties:
+        saved_address_id: { $ref: "#/components/schemas/Uuid" }
+        ad_hoc_address: { $ref: "#/components/schemas/Address" }
+
+    CreateAppRequest:
+      oneOf:
+        - $ref: "#/components/schemas/CreateForwardMailRequest"
+        - $ref: "#/components/schemas/CreateOpenScanRequest"
+      discriminator:
+        propertyName: type
+        mapping:
+          forward_mail: "#/components/schemas/CreateForwardMailRequest"
+          open_scan: "#/components/schemas/CreateOpenScanRequest"
+
+    CreateForwardMailRequest:
+      type: object
+      required: [mail_item_id, type, forward]
+      properties:
+        mail_item_id: { $ref: "#/components/schemas/Uuid" }
+        type:
+          type: string
+          enum: [forward_mail]
+        forward: { $ref: "#/components/schemas/ForwardDestination" }
+      description: |
+        Exactly one of forward.saved_address_id or forward.ad_hoc_address must be provided.
+
+    CreateOpenScanRequest:
+      type: object
+      required: [mail_item_id, type]
+      properties:
+        mail_item_id: { $ref: "#/components/schemas/Uuid" }
+        type:
+          type: string
+          enum: [open_scan]
+
+    Request:
+      type: object
+      required: [request_id, mail_item_id, type, status, submitted_at]
+      properties:
+        request_id: { $ref: "#/components/schemas/Uuid" }
+        mail_item_id: { $ref: "#/components/schemas/Uuid" }
+        type: { $ref: "#/components/schemas/RequestType" }
+        status: { $ref: "#/components/schemas/RequestStatus" }
+        submitted_at: { type: string, format: date-time }
+        note_internal: { type: string }
+        completion:
+          type: object
+          properties:
+            carrier: { type: string }
+            tracking_number: { type: string }
+            label_file_id: { $ref: "#/components/schemas/Uuid" }
+            scan_file_ids:
+              type: array
+              items: { $ref: "#/components/schemas/Uuid" }
+
+    CreateRequestResponse:
+      type: object
+      required: [request]
+      properties:
+        request: { $ref: "#/components/schemas/Request" }
+
+    AppRequestListResponse:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Request" }
+        next_cursor: { type: ["string", "null"] }
+
+    AppRequestDetailResponse:
+      type: object
+      required: [request]
+      properties:
+        request: { $ref: "#/components/schemas/Request" }
+
+    AppComplianceResponse:
+      type: object
+      required: [compliance]
+      properties:
+        compliance:
+          type: object
+          required:
+            - compliance_status
+            - compliance_required_at
+            - grace_expires_at
+            - days_remaining
+            - is_restricted
+            - required_docs
+            - documents
+          properties:
+            compliance_status: { $ref: "#/components/schemas/ComplianceStatus" }
+            compliance_required_at: { type: string, format: date-time }
+            grace_expires_at: { type: string, format: date-time }
+            days_remaining: { type: integer, minimum: 0 }
+            is_restricted: { type: boolean }
+            required_docs:
+              type: array
+              items:
+                type: string
+                enum: [photo_id, proof_of_address]
+            documents:
+              type: array
+              items:
+                $ref: "#/components/schemas/ComplianceDocument"
+
+    ComplianceDocument:
+      type: object
+      required: [document_id, type, status, uploaded_at]
+      properties:
+        document_id: { $ref: "#/components/schemas/Uuid" }
+        type:
+          type: string
+          enum: [photo_id, proof_of_address]
+        status:
+          type: string
+          enum: [initialized, uploaded]
+        uploaded_at:
+          type: ["string", "null"]
+          format: date-time
+
+    InitComplianceDocumentRequest:
+      type: object
+      required: [type, content_type, size_bytes]
+      properties:
+        type:
+          type: string
+          enum: [photo_id, proof_of_address]
+        content_type:
+          type: string
+          enum:
+            - image/jpeg
+            - image/png
+            - application/pdf
+        size_bytes:
+          type: integer
+          minimum: 1
+          maximum: 10485760
+
+    InitComplianceDocumentResponse:
+      type: object
+      required: [document_id, upload_url, upload_headers]
+      properties:
+        document_id: { $ref: "#/components/schemas/Uuid" }
+        upload_url: { type: string }
+        upload_headers:
+          type: object
+          additionalProperties: { type: string }
+
+    CreateAdminMailItem:
+      type: object
+      required:
+        - location_id
+        - mailbox_id
+        - scanned_at
+        - scanned_by
+        - client_scan_id
+        - envelope_image
+      properties:
+        location_id: { $ref: "#/components/schemas/Uuid" }
+        mailbox_id: { $ref: "#/components/schemas/Uuid" }
+        scanned_at: { type: string, format: date-time }
+        scanned_by:
+          type: object
+          required: [user_id, email]
+          properties:
+            user_id: { $ref: "#/components/schemas/Uuid" }
+            email: { type: string, format: email }
+        client_scan_id: { type: string }
+        envelope_image:
+          type: object
+          required: [file_id, storage_key]
+          properties:
+            file_id: { $ref: "#/components/schemas/Uuid" }
+            storage_key: { type: string }
+        ocr_raw_text: { type: string }
+
+    AdminMailItemListResponse:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/MailItemSummary" }
+        next_cursor: { type: ["string", "null"] }
+
+    AdminMailItemDetailResponse:
+      type: object
+      required: [item]
+      properties:
+        item: { $ref: "#/components/schemas/MailItemSummary" }
+
+    Mailbox:
+      type: object
+      required: [mailbox_id, location_id, company_id, compliance_status, compliance_required_at, grace_expires_at]
+      properties:
+        mailbox_id: { $ref: "#/components/schemas/Uuid" }
+        location_id: { $ref: "#/components/schemas/Uuid" }
+        company_id: { $ref: "#/components/schemas/Uuid" }
+        compliance_status: { $ref: "#/components/schemas/ComplianceStatus" }
+        compliance_required_at: { type: string, format: date-time }
+        grace_expires_at: { type: string, format: date-time }
+
+    AdminMailboxListResponse:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Mailbox" }
+        next_cursor: { type: ["string", "null"] }
+
+    CreateMailboxRequest:
+      type: object
+      required: [location_id, company_id, mailbox_label, mailbox_manager_email, mailbox_manager_full_name]
+      properties:
+        location_id: { $ref: "#/components/schemas/Uuid" }
+        company_id: { $ref: "#/components/schemas/Uuid" }
+        mailbox_label: { type: string }
+        mailbox_manager_email: { type: string, format: email }
+        mailbox_manager_full_name: { type: string }
+
+    CreateMailboxResponse:
+      type: object
+      required: [mailbox]
+      properties:
+        mailbox: { $ref: "#/components/schemas/Mailbox" }
+
+    AdminMailboxDetailResponse:
+      type: object
+      required: [mailbox]
+      properties:
+        mailbox: { $ref: "#/components/schemas/Mailbox" }
+
+    AdminRequestListResponse:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Request" }
+        next_cursor: { type: ["string", "null"] }
+
+    AdminRequestDetailResponse:
+      type: object
+      required: [request]
+      properties:
+        request: { $ref: "#/components/schemas/Request" }
+
+    UpdateRequestStatusRequest:
+      type: object
+      required: [new_status]
+      properties:
+        new_status: { $ref: "#/components/schemas/RequestStatus" }
+        note_internal: { type: string }
+        completion:
+          type: object
+          properties:
+            carrier: { type: string }
+            tracking_number: { type: string }
+            label_file_id: { $ref: "#/components/schemas/Uuid" }
+            scan_file_ids:
+              type: array
+              items: { $ref: "#/components/schemas/Uuid" }
+      description: |
+        Completion rules:
+        - For forward_mail when setting completed: carrier and tracking_number required (label_file_id optional).
+        - For open_scan when setting completed: scan_file_ids must contain at least one id.
+
+    AdminComplianceListResponse:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminComplianceCase"
+        next_cursor: { type: ["string", "null"] }
+
+    AdminComplianceCase:
+      type: object
+      required: [mailbox_id, compliance_status, grace_expires_at, required_docs, documents]
+      properties:
+        mailbox_id: { $ref: "#/components/schemas/Uuid" }
+        compliance_status: { $ref: "#/components/schemas/ComplianceStatus" }
+        grace_expires_at: { type: string, format: date-time }
+        required_docs:
+          type: array
+          items:
+            type: string
+            enum: [photo_id, proof_of_address]
+        documents:
+          type: array
+          items: { $ref: "#/components/schemas/ComplianceDocument" }
+
+    AdminComplianceDetailResponse:
+      type: object
+      required: [case]
+      properties:
+        case: { $ref: "#/components/schemas/AdminComplianceCase" }
+
+    RejectComplianceRequest:
+      type: object
+      required: [reason_code]
+      properties:
+        reason_code:
+          type: string
+          enum: [illegible, expired, mismatch, incomplete, other]
+        reason_text: { type: string }
