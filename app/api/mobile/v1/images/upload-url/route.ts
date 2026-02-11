@@ -75,10 +75,10 @@ export async function POST(request: NextRequest) {
     const storagePath = `${operator_id}/${timestamp}/${uniqueId}.${fileExt}`
 
     // Generate signed URL for upload
-    // Bucket name: mail-items
+    // Bucket name: mail-photos
     const { data: uploadData, error: uploadError } = await supabase
       .storage
-      .from('mail-items')
+      .from('mail-photos')
       .createSignedUploadUrl(storagePath)
 
     if (uploadError) {
@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           { 
             error: 'Storage bucket not configured',
-            details: 'Please create the mail-items bucket in Supabase'
+            details: 'Please create the mail-photos bucket in Supabase'
           },
           { status: 500 }
         )
