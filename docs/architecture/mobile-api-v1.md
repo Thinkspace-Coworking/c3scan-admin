@@ -171,12 +171,41 @@ This avoids base64 overhead and leverages Supabase's signed URL security.
 
 ## Required API Endpoints
 
-### 1. Authentication
+### 1. Authentication (Google OAuth)
 ```
 POST /api/mobile/v1/auth/token
-Body: { "email": "peter@thinkspace.com", "password": "..." }
-Response: { "access_token": "jwt", "operator_id": "uuid", "locations": [...] }
+Body: {
+  "id_token": "<Google ID Token from iOS>",
+  "provider": "google",
+  "operator_id": "uuid"
+}
+Response: {
+  "access_token": "jwt",
+  "token_type": "Bearer",
+  "expires_in": 2592000,
+  "user": {
+    "user_id": "uuid",
+    "email": "peter@thinkspace.com",
+    "display_name": "Peter Chee"
+  },
+  "operator": {
+    "operator_id": "uuid",
+    "operator_name": "Thinkspace",
+    "slug": "thinkspace"
+  },
+  "locations": [...]
+}
 ```
+
+**Auth Flow:**
+1. iOS app authenticates with Google Sign-In
+2. Receives Google ID token
+3. Sends ID token to `/auth/token`
+4. Server verifies token with Google
+5. Returns JWT for subsequent API calls
+6. Email stored/displayed in settings screen
+
+**Security:** No passwords stored. OAuth only.
 
 ### 2. Sync Company Aliases
 ```
