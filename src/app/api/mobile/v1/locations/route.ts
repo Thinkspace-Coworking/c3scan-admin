@@ -65,7 +65,9 @@ export async function GET(request: NextRequest) {
         postal_code,
         country_code,
         property_id,
-        is_active
+        is_active,
+        latitude,
+        longitude
       `)
       .eq('operator_id', operatorId)
       .eq('is_active', true)
