@@ -1048,11 +1048,40 @@ This feature enables the c3scan iOS app to determine a user's current coworking 
 
 ### 12.5 Mobile App Settings
 
-**Geofence Radius Setting**:
-- Location: Settings → Location → Geofence Radius
-- Options: 100m, 500m, 1mi, 3mi, 6mi, 10mi, Custom
-- Default: 500 meters
-- Storage: Saved locally in UserDefaults, synced to server if user is authenticated
+**Settings Screen Layout (Top to Bottom)**:
+
+1. **Account Information Section** (Top of screen, always visible when authenticated)
+   - Operator Name (with building icon)
+   - Employee Email Address (with envelope icon)
+   - Current Location Name (with map pin icon)
+   - Log Out button (red, centered)
+   - *Purpose: Always-visible context for which operator/location the employee is working under*
+
+2. **Location Settings Section**
+   - Location picker (if multiple locations available)
+   - Current location display (if single location)
+   - Loading indicator during location fetch
+
+3. **Geofencing Section**
+   - Detection Radius picker
+   - "Detect Location Automatically" button
+   - Options: 100m, 500m, 1mi, 3mi, 6mi, 10mi, 20mi
+   - Default: 10 miles
+   - Storage: Saved locally in UserDefaults
+
+4. **Photo Storage Section**
+   - Toggle: Save to c3scan.io Album
+   - Toggle: Keep Separate from Camera Roll (when enabled)
+
+5. **About Section**
+   - App Version
+   - Build Number
+
+**Security Context Display**:
+The Account Information section at the top serves as a persistent security indicator, ensuring the employee always knows:
+- Which operator they are representing
+- Which email account they're logged in as
+- Which location their scans will be assigned to
 
 ### 12.6 Expected Outcome
 
