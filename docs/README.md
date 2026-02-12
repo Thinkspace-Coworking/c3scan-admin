@@ -67,7 +67,39 @@ Third-party API documentation and integration specifications.
 | UI/UX v1.2 | Build Spec v0.2.3 | Terminology aligned (Operator, Member, Mailbox Manager) |
 | WebAPI Contract v1 | - | Consolidates all 28 endpoints |
 
+## Deployment
+
+### Vercel Production Environment
+
+**Production URL:** https://c3scan.thinkspace.com
+
+**Required Environment Variables:**
+
+| Variable | Environment | Purpose |
+|----------|-------------|---------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Production | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Production | Supabase anon key for client-side |
+| `SUPABASE_SERVICE_ROLE_KEY` | Production | **Server-side only** - for API routes |
+
+**Security Note:** `SUPABASE_SERVICE_ROLE_KEY` must only exist in Vercel server environment. Never expose in client-side code or iOS app.
+
+### Mobile API Endpoints
+
+Production mobile API base: `https://c3scan.thinkspace.com/api/mobile/v1`
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/auth/token` | POST | Google OAuth token exchange |
+| `/aliases/sync` | GET | Sync company aliases to iOS app |
+| `/aliases/search` | GET | Search aliases (manual override) |
+| `/mail` | POST | Upload scanned mail item |
+| `/mail/batch` | POST | Batch upload mail items |
+| `/alias-suggestions` | POST | Submit unmatched alias suggestion |
+| `/locations` | GET | Get operator locations |
+| `/stats` | GET | Get scanning statistics |
+
 ## Useful Links
 
 - GitHub Repository: https://github.com/Thinkspace-Coworking/c3scan-admin
 - Production: https://c3scan.thinkspace.com
+- iOS App Repository: https://github.com/Thinkspace-Coworking/GoPostal
