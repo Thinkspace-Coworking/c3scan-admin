@@ -1046,20 +1046,32 @@ This feature enables the c3scan iOS app to determine a user's current coworking 
 - `is_active` (boolean)
 - `created_at`, `updated_at` (timestamps)
 
-### 12.5 Mobile App Launch Flow
+### 12.5 Mobile App Authentication Flow
 
 **App Launch Sequence:**
 
 1. **App Start** → Database initialization → Camera initialization
 2. **Check Google OAuth Status**:
-   - If NOT authenticated → Show Login screen
+   - If NOT authenticated → Show Login screen immediately
    - If ALREADY authenticated → Proceed to geolocation check
-3. **Geolocation Check** (runs on every launch if authenticated):
+3. **Geolocation Check** (runs on EVERY login/app launch if authenticated):
    - Get current GPS coordinates
    - Call `POST /api/mobile/v1/geofence/detect`
    - Auto-select closest location within radius
    - Show location picker if multiple locations found
 4. **Main Camera Screen** appears (ready for scanning)
+
+**Logout Flow:**
+1. User taps **Log Out** in Settings
+2. Auth token is cleared immediately
+3. **Login screen appears automatically** (no manual steps)
+4. User must sign in with Google to continue
+5. After successful login → Geolocation check runs → Location updated
+
+**Key Principles:**
+- **No "remember me" that bypasses login** - User must authenticate every session
+- **Geolocation on every login** - Location is always checked after authentication
+- **Forced re-authentication** - Logout immediately triggers login screen
 
 ### 12.6 Mobile App Settings
 
@@ -1096,7 +1108,7 @@ This feature enables the c3scan iOS app to determine a user's current coworking 
 - User opens Settings
 - If authenticated: Shows Operator, Email, Location, Logout button
 - If NOT authenticated: Shows "Not Signed In" prompt with Sign In button
-- Tapping Logout clears auth token and shows login screen
+- **Tapping Logout**: Clears auth token → **Immediately shows login screen** → User must re-authenticate
 
 **Security Context Display**:
 The Account Information section at the top serves as a persistent security indicator, ensuring the employee always knows:
