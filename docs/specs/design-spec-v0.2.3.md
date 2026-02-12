@@ -942,19 +942,67 @@ Forward Mail and Open & Scan request detail screens
 ### 12.1 Overview
 This feature enables the c3scan iOS app to determine a user's current coworking location and operator based on their phone's latitude and longitude. It supports multiple operators and includes a customizable geofence radius setting.
 
-### 12.2 Technical Flow
+### 12.2 Technical Flow (API-Based)
 
-1. **Latitude/Longitude Read**: On user login, the app retrieves the device's current GPS coordinates.
+1. **Latitude/Longitude Read**: On user login or when "Detect Location" is tapped, the app retrieves the device's current GPS coordinates using iOS CoreLocation.
 
-2. **Customizable Geofence Radius**: The user can set the geofence radius in the app's settings menu. This radius can be defined in either meters or miles. For example, if the user sets the radius to six miles, they will be recognized as being within the Thinkspace Redmond location even if they are logging in from their home six miles away.
+2. **API Geofence Detection**: The app sends GPS coordinates to the backend API `POST /api/mobile/v1/geofence/detect` with the configured radius (default 10 miles).
 
-3. **Geofencing Check**: Using the configured radius, the app determines which geofence the user is inside. This flexibility is especially useful during testing or for users who need a larger radius to be considered "on site."
+3. **Server-Side Distance Calculation**: The API uses the Haversine formula to calculate distance between user's GPS coordinates and all operator locations stored in the database.
 
-4. **Operator Identification**: After determining the location, the app cross-references the operator table by the user's email domain and the geofenced location to find the correct operator.
+4. **Multiple Locations Handling**: 
+   - If **one location** is found within radius → Auto-select it
+   - If **multiple locations** are found → Show location picker to employee
+   - If **no locations** found → Prompt to select manually or increase radius
 
-5. **Context Setting**: With both the operator and location identified, the app sets the session context so that all actions are scoped appropriately.
+5. **Context Setting**: Selected location ID is saved to UserDefaults and used for all subsequent API calls (sync, upload, etc.).
 
-### 12.3 Data Tables
+### 12.3 Geofencing API
+
+**Endpoint**: `POST /api/mobile/v1/geofence/detect`
+
+**Request Body**:
+```json
+{
+  "latitude": 47.6062,
+  "longitude": -122.3321,
+  "radius_miles": 10.0
+}
+```
+
+**Response Body**:
+```json
+{
+  "user_location": {
+    "latitude": 47.6062,
+    "longitude": -122.3321
+  },
+  "radius_miles": 10.0,
+  "locations": [
+    {
+      "location_id": "db4aaf76-426c-4b2b-bbb2-c7e4b9b687bf",
+      "location_name": "Thinkspace Redmond",
+      "address": {
+        "street": "16150 NE 85th St",
+        "city": "Redmond",
+        "state": "WA",
+        "zip": "98052"
+      },
+      "latitude": 47.6784,
+      "longitude": -122.1234,
+      "distance_miles": 6.2
+    }
+  ],
+  "count": 1,
+  "closest_location": {
+    "location_id": "db4aaf76-426c-4b2b-bbb2-c7e4b9b687bf",
+    "location_name": "Thinkspace Redmond",
+    "distance_miles": 6.2
+  }
+}
+```
+
+### 12.4 Data Tables
 
 **Operator Table**: Contains details for all operators (e.g., Thinkspace, 25N, Blankspaces).
 - `operator_id` (UUID)
@@ -974,7 +1022,7 @@ This feature enables the c3scan iOS app to determine a user's current coworking 
 - `is_active` (boolean)
 - `created_at`, `updated_at` (timestamps)
 
-### 12.4 Mobile App Settings
+### 12.5 Mobile App Settings
 
 **Geofence Radius Setting**:
 - Location: Settings → Location → Geofence Radius
@@ -982,11 +1030,11 @@ This feature enables the c3scan iOS app to determine a user's current coworking 
 - Default: 500 meters
 - Storage: Saved locally in UserDefaults, synced to server if user is authenticated
 
-### 12.5 Expected Outcome
+### 12.6 Expected Outcome
 
 When a user logs in, the app will accurately set the session for the correct operator and location, with the flexibility of adjusting the geofence radius to suit different scenarios. This ensures that even during testing or special cases, the correct location context is applied.
 
-### 12.6 Privacy Considerations
+### 12.7 Privacy Considerations
 
 - GPS location is only read at login and when manually refreshing location
 - Location data is not stored on the server, only used for session context
