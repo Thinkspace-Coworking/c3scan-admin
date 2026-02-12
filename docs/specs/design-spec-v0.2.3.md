@@ -942,7 +942,21 @@ Forward Mail and Open & Scan request detail screens
 ### 12.1 Overview
 This feature enables the c3scan iOS app to determine a user's current coworking location and operator based on their phone's latitude and longitude. It supports multiple operators and includes a customizable geofence radius setting.
 
-### 12.2 Technical Flow (API-Based)
+### 12.2 Security Model (CRITICAL)
+
+**Operator Domain Isolation:**
+- The operator_id is determined at login based on the user's email domain
+- The JWT token contains the operator_id and is cryptographically signed
+- The geofence API uses the operator_id from the JWT token to filter locations
+- **A Thinkspace employee can NEVER see 25N locations, even if physically standing next to one**
+
+**Security Boundaries:**
+1. **Authentication Layer**: JWT token validates user identity
+2. **Authorization Layer**: operator_id in token restricts data to user's operator only
+3. **Client Verification**: iOS app verifies operator_id in response matches current user
+4. **Audit Logging**: All geofence detections are logged with user_id, operator_id, and coordinates
+
+### 12.3 Technical Flow (API-Based)
 
 1. **Latitude/Longitude Read**: On user login or when "Detect Location" is tapped, the app retrieves the device's current GPS coordinates using iOS CoreLocation.
 
@@ -950,12 +964,16 @@ This feature enables the c3scan iOS app to determine a user's current coworking 
 
 3. **Server-Side Distance Calculation**: The API uses the Haversine formula to calculate distance between user's GPS coordinates and all operator locations stored in the database.
 
-4. **Multiple Locations Handling**: 
+4. **Operator Filtering**: API filters locations by operator_id from JWT token, ensuring cross-operator isolation.
+
+5. **Client Verification**: iOS app verifies the operator_id in the response matches the logged-in user's operator.
+
+6. **Multiple Locations Handling**: 
    - If **one location** is found within radius → Auto-select it
    - If **multiple locations** are found → Show location picker to employee
    - If **no locations** found → Prompt to select manually or increase radius
 
-5. **Context Setting**: Selected location ID is saved to UserDefaults and used for all subsequent API calls (sync, upload, etc.).
+7. **Context Setting**: Selected location ID is saved to UserDefaults and used for all subsequent API calls (sync, upload, etc.).
 
 ### 12.3 Geofencing API
 
@@ -994,6 +1012,7 @@ This feature enables the c3scan iOS app to determine a user's current coworking 
     }
   ],
   "count": 1,
+  "operator_id": "db4aaf76-426c-4b2b-bbb2-c7e4b9b687bf",
   "closest_location": {
     "location_id": "db4aaf76-426c-4b2b-bbb2-c7e4b9b687bf",
     "location_name": "Thinkspace Redmond",
@@ -1001,6 +1020,11 @@ This feature enables the c3scan iOS app to determine a user's current coworking 
   }
 }
 ```
+
+**Security Notes:**
+- `operator_id` in response is returned for client-side verification
+- API only returns locations for the operator_id extracted from the JWT token
+- Cross-operator location leakage is prevented at the database query level
 
 ### 12.4 Data Tables
 

@@ -37,6 +37,8 @@ function calculateDistance(
 
 // POST /api/mobile/v1/geofence/detect
 // Detect nearby locations based on GPS coordinates
+// SECURITY: operator_id comes from JWT token (set at login based on email domain)
+// This ensures users can ONLY see locations for their assigned operator
 export async function POST(request: NextRequest) {
   try {
     // Get auth token from header
@@ -57,6 +59,12 @@ export async function POST(request: NextRequest) {
         { status: 401 }
       )
     }
+
+    // SECURITY: operator_id is determined at login from user's email domain
+    // This prevents cross-operator location leakage (e.g., Thinkspace user
+    // cannot see 25N locations even if physically nearby)
+    const operatorId = tokenData.operator_id
+    const userId = tokenData.user_id
 
     // Get request body
     const body = await request.json()
@@ -86,7 +94,8 @@ export async function POST(request: NextRequest) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-    // Fetch all active locations for this operator
+    // SECURITY: Only fetch locations for the authenticated user's operator
+    // This is the critical boundary that prevents cross-operator data leakage
     const { data: locations, error } = await supabase
       .from('location')
       .select(`
@@ -101,7 +110,7 @@ export async function POST(request: NextRequest) {
         latitude,
         longitude
       `)
-      .eq('operator_id', tokenData.operator_id)
+      .eq('operator_id', operatorId)
       .eq('is_active', true)
 
     if (error) {
@@ -140,6 +149,9 @@ export async function POST(request: NextRequest) {
       .filter((loc) => loc.distance_miles <= radius_miles)
       .sort((a, b) => a.distance_miles - b.distance_miles)
 
+    // SECURITY AUDIT LOG: Log geofence detection for security review
+    console.log(`[GEOFENCE] user=${userId} operator=${operatorId} locations_found=${locationsWithDistance.length} radius=${radius_miles}mi coords=${latitude},${longitude}`)
+
     // Return results
     return NextResponse.json({
       user_location: {
@@ -149,6 +161,7 @@ export async function POST(request: NextRequest) {
       radius_miles: radius_miles,
       locations: locationsWithDistance,
       count: locationsWithDistance.length,
+      operator_id: operatorId, // Included for client verification
       closest_location:
         locationsWithDistance.length > 0
           ? {
