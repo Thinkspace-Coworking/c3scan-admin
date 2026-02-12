@@ -161,7 +161,8 @@ export async function POST(request: NextRequest) {
       operator: {
         operator_id: operatorData.operator_id,
         operator_name: operatorData.operator_name,
-        slug: operatorData.slug
+        slug: operatorData.slug,
+        email_domain: operatorData.email_domain
       },
       locations: locations || []
     })
