@@ -117,18 +117,18 @@ export async function GET(request: NextRequest) {
       const mailbox = mailboxes.find(m => m.mailbox_id === alias.mailbox_id)
       // Handle company as either array or object from Supabase
       const companyData = alias.company as { company_name?: string } | Array<{ company_name?: string }> | null
-      const companyName = Array.isArray(companyData) 
-        ? companyData[0]?.company_name 
+      const companyName = Array.isArray(companyData)
+        ? companyData[0]?.company_name
         : companyData?.company_name
       return {
         company_id: alias.company_id,
         alias_name: alias.alias_name,
         alias_name_normalized: alias.alias_name_normalized,
         alias_type: alias.alias_type,
-        mailbox_id: alias.mailbox_id,
-        mailbox_pmb: mailbox?.pmb_number || null,
-        location_id: mailbox?.location_id || null,
-        company_name: companyName || null,
+        mailbox_id: alias.mailbox_id || "",
+        mailbox_pmb: mailbox?.pmb_number || "",
+        location_id: mailbox?.location_id || "",
+        company_name: companyName || alias.alias_name || "",
         is_active: alias.is_active,
         updated_at: alias.updated_at
       }

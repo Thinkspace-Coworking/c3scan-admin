@@ -128,16 +128,16 @@ export async function GET(request: NextRequest) {
     const formattedResults = searchResults.map((result: any) => {
       const mailbox = mailboxes.find((m: any) => m.mailbox_id === result.mailbox_id)
       const company = Array.isArray(result.company) ? result.company[0] : result.company
-      
+
       return {
         company_alias_id: result.company_alias_id,
         company_id: result.company_id,
-        company_name: company?.company_name || result.alias_name,
+        company_name: company?.company_name || result.alias_name || "",
         alias_name: result.alias_name,
         alias_type: result.alias_type,
-        mailbox_id: result.mailbox_id,
-        mailbox_pmb: mailbox?.pmb_number || null,
-        location_id: mailbox?.location_id || null,
+        mailbox_id: result.mailbox_id || "",
+        mailbox_pmb: mailbox?.pmb_number || "",
+        location_id: mailbox?.location_id || "",
         confidence: 1.0 // Manual selection = high confidence
       }
     })
