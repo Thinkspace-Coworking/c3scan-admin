@@ -16,7 +16,7 @@ function verifyToken(token: string): { user_id: string; operator_id: string; ema
 }
 
 // POST /api/mobile/v1/mail
-// Create a mail item after image upload
+// Create a mail item in staging table (no constraints) for post-processing
 export async function POST(request: NextRequest) {
   try {
     // Get auth token from header
@@ -42,7 +42,8 @@ export async function POST(request: NextRequest) {
     const {
       operator_id,
       location_id,
-      mailbox_id,
+      mailbox_id,        // This is the PMB string (e.g., "1614")
+      mailbox_pmb,       // Alternative field name
       scanned_by_email,
       envelope_image,
       ocr_raw_text,
@@ -52,13 +53,15 @@ export async function POST(request: NextRequest) {
       tracking_number,
       scanned_at,
       image_hash,
-      client_scan_id
+      client_scan_id,
+      company_id,        // Company identifier
+      company_name       // Company name for reference
     } = body
 
     // Validate required fields
-    if (!operator_id || !location_id || !mailbox_id || !scanned_by_email || !envelope_image) {
+    if (!operator_id || !scanned_by_email || !envelope_image) {
       return NextResponse.json(
-        { error: 'Missing required fields: operator_id, location_id, mailbox_id, scanned_by_email, envelope_image' },
+        { error: 'Missing required fields: operator_id, scanned_by_email, envelope_image' },
         { status: 400 }
       )
     }
@@ -73,109 +76,55 @@ export async function POST(request: NextRequest) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-    // Get user_id from email
-    const { data: userData } = await supabase
-      .from('user_account')
-      .select('user_id')
-      .eq('email', scanned_by_email.toLowerCase())
-      .single()
+    // Use the PMB value - could be in mailbox_id or mailbox_pmb field
+    const pmbValue = mailbox_pmb || mailbox_id
 
-    // Create mail_item record
-    const { data: mailItem, error: insertError } = await supabase
-      .from('mail_item')
+    // Insert into STAGING table (no constraints, flexible schema)
+    const { data: stagingItem, error: insertError } = await supabase
+      .from('mail_item_staging')
       .insert({
         operator_id,
-        location_id,
-        mailbox_id,
+        location_id: location_id || null,
+        mailbox_pmb: pmbValue,                    // Store PMB string (e.g., "1614")
+        company_id: company_id || null,           // Company identifier if available
+        company_name: company_name || null,       // Company name for reference
         received_at: scanned_at || new Date().toISOString(),
-        status: 'received',
-        is_active: true,
-        match_method: ocr_raw_text ? 'fuzzy' : 'manual',
-        match_confidence: ocr_confidence || 0,
-        ocr_text: ocr_raw_text,
-        app_version: '1.0.0', // Should come from client
-        scan_mode: package_type || 'standard',
-        confidence_score: ocr_confidence
+        status: 'pending_processing',             // Will be processed by post-processor
+        scanned_by_email: scanned_by_email.toLowerCase(),
+        envelope_image: envelope_image.replace('storage_path:', ''),
+        ocr_text: ocr_raw_text || null,
+        ocr_confidence: ocr_confidence || 0,
+        match_confidence: body.match_confidence || ocr_confidence || 0,
+        match_method: body.match_method || (ocr_raw_text ? 'fuzzy_ocr' : 'manual'),
+        package_type: package_type || null,
+        carrier: carrier || null,
+        tracking_number: tracking_number || null,
+        client_scan_id: client_scan_id || null,
+        image_hash: image_hash || null,
+        app_version: body.app_version || '1.0.0',
+        raw_payload: body  // Store entire original payload for debugging
       })
-      .select('mail_item_id')
+      .select('staging_id')
       .single()
 
     if (insertError) {
-      console.error('Mail item insert error:', insertError)
+      console.error('Staging insert error:', insertError)
       return NextResponse.json(
-        { error: 'Failed to create mail item' },
+        { error: 'Failed to stage mail item', details: insertError.message },
         { status: 500 }
       )
     }
 
-    // Create mail_item_image record
-    const { error: imageError } = await supabase
-      .from('mail_item_image')
-      .insert({
-        operator_id,
-        mail_item_id: mailItem.mail_item_id,
-        image_type: 'envelope',
-        storage_path: envelope_image.replace('storage_path:', ''), // Remove prefix if present
-        mime_type: 'image/jpeg', // Should detect from actual file
-        created_at: new Date().toISOString()
-      })
-
-    if (imageError) {
-      console.error('Mail image insert error:', imageError)
-      // Don't fail the whole request, but log it
-    }
-
-    // Create OCR extraction record if text was captured
-    if (ocr_raw_text) {
-      const { error: ocrError } = await supabase
-        .from('ocr_extraction')
-        .insert({
-          operator_id,
-          mail_item_id: mailItem.mail_item_id,
-          source: 'ios',
-          model_version: 'on-device-v1',
-          confidence_score: ocr_confidence || 0,
-          raw_text: ocr_raw_text,
-          created_at: new Date().toISOString()
-        })
-
-      if (ocrError) {
-        console.error('OCR extraction insert error:', ocrError)
-      }
-    }
-
-    // Create mail event for tracking
-    const { error: eventError } = await supabase
-      .from('mail_event')
-      .insert({
-        operator_id,
-        mail_item_id: mailItem.mail_item_id,
-        event_type: 'scanned',
-        event_payload: {
-          scanned_by: scanned_by_email,
-          client_scan_id,
-          image_hash,
-          carrier,
-          tracking_number
-        },
-        event_at: new Date().toISOString(),
-        created_by_user_id: userData?.user_id || null
-      })
-
-    if (eventError) {
-      console.error('Mail event insert error:', eventError)
-    }
-
     return NextResponse.json({
-      mail_item_id: mailItem.mail_item_id,
-      status: 'received',
-      message: 'Mail item created successfully'
+      staging_id: stagingItem.staging_id,
+      status: 'pending_processing',
+      message: 'Mail item staged successfully - will be processed into mail_item table'
     }, { status: 201 })
 
   } catch (error) {
-    console.error('Mail creation error:', error)
+    console.error('Mail staging error:', error)
     return NextResponse.json(
-      { error: 'Failed to create mail item' },
+      { error: 'Failed to stage mail item' },
       { status: 500 }
     )
   }
