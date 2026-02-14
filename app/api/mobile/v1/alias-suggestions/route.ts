@@ -97,6 +97,18 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (suggestionError) {
+      // Handle duplicate alias suggestion (already pending)
+      if (suggestionError.code === '23505') {
+        return NextResponse.json(
+          {
+            error: 'Duplicate alias suggestion',
+            message: `"${suggested_alias}" is already pending admin review. Please check back later or contact your admin.`,
+            code: 'ALREADY_PENDING'
+          },
+          { status: 409 }
+        )
+      }
+
       console.error('Alias suggestion creation error:', suggestionError)
       Sentry.captureException(suggestionError, {
         extra: {
