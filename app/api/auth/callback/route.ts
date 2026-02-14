@@ -23,7 +23,7 @@ interface CognitoTokenResponse {
 }
 
 interface CognitoIdTokenClaims {
-  sub: string;
+  sub: string;  // Cognito UUID (maps to cognito_sub)
   email: string;
   email_verified: boolean;
   name?: string;
@@ -34,11 +34,12 @@ interface CognitoIdTokenClaims {
     providerName: string;
     providerType: string;
   }>;
+  // ACC v1.0 Claims (set by pre-token generation lambda or post-auth hook)
+  'custom:user_id'?: string;
+  'custom:roles'?: string | string[];
   'custom:operator_id'?: string;
-  'custom:company_ids'?: string;
-  'custom:role'?: string;
+  'custom:location_ids'?: string | string[];
   'custom:auth_provider'?: string;
-  'custom:location_ids'?: string;
   iat: number;
   exp: number;
 }
@@ -112,19 +113,72 @@ function validateAndDecodeIdToken(idToken: string): CognitoIdTokenClaims {
 }
 
 /**
+ * Parse roles from JWT claims (handles string or array)
+ */
+function parseRoles(rolesClaim: string | string[] | undefined): string[] {
+  if (!rolesClaim) return ['member']; // Default role
+  
+  if (Array.isArray(rolesClaim)) {
+    return rolesClaim;
+  }
+  
+  try {
+    // Try parsing as JSON array
+    const parsed = JSON.parse(rolesClaim);
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+  } catch {
+    // Not JSON, treat as comma-separated or single value
+  }
+  
+  return rolesClaim.split(',').map(r => r.trim()).filter(Boolean);
+}
+
+/**
+ * Parse location_ids from JWT claims
+ */
+function parseLocationIds(locationIdsClaim: string | string[] | undefined): string[] {
+  if (!locationIdsClaim) return [];
+  
+  if (Array.isArray(locationIdsClaim)) {
+    return locationIdsClaim;
+  }
+  
+  try {
+    const parsed = JSON.parse(locationIdsClaim);
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+  } catch {
+    // Not JSON
+  }
+  
+  return locationIdsClaim.split(',').map(id => id.trim()).filter(Boolean);
+}
+
+/**
  * Lookup or create user in c3scan database
+ * Uses new schema with ACC v1.0 claims
  */
 async function syncUserWithDatabase(
   claims: CognitoIdTokenClaims,
   operatorId: string
-): Promise<{ userId: string; role: string }> {
+): Promise<{ userId: string; roles: string[] }> {
   const email = claims.email.toLowerCase();
   const cognitoSub = claims.sub;
   
+  // Parse roles from JWT claims (ACC v1.0: custom:roles)
+  const roles = parseRoles(claims['custom:roles']);
+  const locationIds = parseLocationIds(claims['custom:location_ids']);
+  const authProvider = claims['custom:auth_provider'] || 
+                       claims.identities?.[0]?.providerName || 
+                       'Cognito';
+  
   // Try to find existing user by Cognito sub
   let { data: user, error: userError } = await supabase
-    .from('user_accounts')
-    .select('user_id, email, role, operator_id')
+    .from('user_account')
+    .select('user_id, email, roles, operator_id, cognito_sub')
     .eq('cognito_sub', cognitoSub)
     .single();
   
@@ -135,8 +189,8 @@ async function syncUserWithDatabase(
   // If not found by Cognito sub, try by email within operator
   if (!user) {
     const { data: userByEmail, error: emailError } = await supabase
-      .from('user_accounts')
-      .select('user_id, email, role, operator_id, cognito_sub')
+      .from('user_account')
+      .select('user_id, email, roles, operator_id, cognito_sub')
       .eq('email', email)
       .eq('operator_id', operatorId)
       .single();
@@ -148,13 +202,15 @@ async function syncUserWithDatabase(
     if (userByEmail) {
       user = userByEmail;
       
-      // Update user with Cognito sub if not set
+      // Update user with Cognito info if not set
       if (!userByEmail.cognito_sub) {
         await supabase
-          .from('user_accounts')
+          .from('user_account')
           .update({
             cognito_sub: cognitoSub,
-            auth_provider: claims.identities?.[0]?.providerName || 'Cognito',
+            auth_provider: authProvider,
+            roles: JSON.stringify(roles),
+            location_ids: locationIds,
             updated_at: new Date().toISOString()
           })
           .eq('user_id', userByEmail.user_id);
@@ -164,37 +220,22 @@ async function syncUserWithDatabase(
   
   // Create new user if not found
   if (!user) {
-    // Determine role based on auth context
-    let role = 'member_user'; // Default for customers
-    
-    // Check if this email belongs to an operator staff member
-    const { data: staffCheck } = await supabase
-      .from('operator_users')
-      .select('role')
-      .eq('email', email)
-      .eq('operator_id', operatorId)
-      .single();
-    
-    if (staffCheck) {
-      role = staffCheck.role; // operator_staff, operator_admin, etc.
-    }
-    
-    // Create user
+    // Create user with ACC v1.0 schema
     const { data: newUser, error: createError } = await supabase
-      .from('user_accounts')
+      .from('user_account')
       .insert({
         email,
         cognito_sub: cognitoSub,
         operator_id: operatorId,
-        role,
-        auth_provider: claims.identities?.[0]?.providerName || 'Cognito',
-        first_name: claims.given_name,
-        last_name: claims.family_name,
+        roles: JSON.stringify(roles),
+        location_ids: locationIds,
+        auth_provider: authProvider,
+        display_name: claims.name || `${claims.given_name || ''} ${claims.family_name || ''}`.trim(),
         is_active: true,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       })
-      .select('user_id, role')
+      .select('user_id, roles')
       .single();
     
     if (createError) {
@@ -202,27 +243,56 @@ async function syncUserWithDatabase(
     }
     
     user = newUser;
+    
+    // Also create user_identity record
+    await supabase
+      .from('user_identities')
+      .insert({
+        user_id: newUser.user_id,
+        provider_type: authProvider.toLowerCase(),
+        provider_user_id: cognitoSub,
+        provider_email: email,
+        is_primary: true,
+        created_at: new Date().toISOString(),
+        last_used_at: new Date().toISOString()
+      });
+    
+    // Sync to user_role table for backward compatibility
+    for (const role of roles) {
+      await supabase
+        .from('user_role')
+        .insert({
+          user_id: newUser.user_id,
+          operator_id: operatorId,
+          role_type: role,
+          is_active: true,
+          created_at: new Date().toISOString()
+        });
+    }
   }
   
-  return { userId: user.user_id, role: user.role };
+  // Parse roles if stored as JSON string
+  const userRoles = typeof user.roles === 'string' 
+    ? JSON.parse(user.roles) 
+    : user.roles || [];
+  
+  return { userId: user.user_id, roles: userRoles };
 }
 
 /**
- * Determine redirect path based on user role
+ * Determine redirect path based on user roles (ACC v1.0)
  */
-function getRedirectPath(role: string, operatorSlug: string): string {
-  switch (role) {
-    case 'operator_admin':
-    case 'operator_staff':
-    case 'compliance_reviewer':
-    case 'billing_admin':
-      return '/admin'; // Staff go to admin portal
-    
-    case 'member_user':
-    case 'mailbox_manager':
-    default:
-      return '/app/select-mailbox'; // Customers go to customer portal
+function getRedirectPath(roles: string[], operatorSlug: string): string {
+  // Check for staff roles first
+  const staffRoles = ['platform_admin', 'operator_admin', 'operator_staff', 'compliance_reviewer', 'billing_admin', 'location_staff'];
+  const hasStaffRole = roles.some(role => staffRoles.includes(role));
+  
+  if (hasStaffRole) {
+    return '/admin'; // Staff go to admin portal
   }
+  
+  // Default: customers go to customer portal
+  return '/app/select-mailbox';
 }
 
 export async function GET(request: NextRequest) {
@@ -282,7 +352,7 @@ export async function GET(request: NextRequest) {
     }
     
     // Sync user with c3scan database
-    const { userId, role } = await syncUserWithDatabase(claims, operator.operator_id);
+    const { userId, roles } = await syncUserWithDatabase(claims, operator.operator_id);
     
     // Create c3scan session
     // Note: In production, you might want to create your own JWT
@@ -290,7 +360,7 @@ export async function GET(request: NextRequest) {
     const sessionData = {
       userId,
       email: claims.email,
-      role,
+      roles,
       operatorId: operator.operator_id,
       cognitoSub: claims.sub,
       authProvider: claims.identities?.[0]?.providerName || 'Cognito',
@@ -300,8 +370,8 @@ export async function GET(request: NextRequest) {
       expiresAt: Date.now() + (tokens.expires_in * 1000)
     };
     
-    // Determine redirect based on role
-    const redirectPath = getRedirectPath(role, operator.slug);
+    // Determine redirect based on roles (ACC v1.0)
+    const redirectPath = getRedirectPath(roles, operator.slug);
     
     // Create response with redirect
     const response = NextResponse.redirect(redirectPath);
