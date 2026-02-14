@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import * as Sentry from '@sentry/nextjs'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -97,8 +98,23 @@ export async function POST(request: NextRequest) {
 
     if (suggestionError) {
       console.error('Alias suggestion creation error:', suggestionError)
+      Sentry.captureException(suggestionError, {
+        extra: {
+          context: 'alias_suggestion_insert',
+          operator_id,
+          location_id,
+          suggested_alias,
+          error_code: suggestionError.code,
+          error_details: suggestionError.message,
+          hint: suggestionError.hint,
+        },
+        tags: {
+          endpoint: 'alias-suggestions',
+          error_type: 'database_insert',
+        }
+      })
       return NextResponse.json(
-        { error: 'Failed to create alias suggestion' },
+        { error: 'Failed to create alias suggestion', details: suggestionError.message },
         { status: 500 }
       )
     }
@@ -185,6 +201,15 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Alias suggestion error:', error)
+    Sentry.captureException(error, {
+      extra: {
+        context: 'alias_suggestions_post',
+      },
+      tags: {
+        endpoint: 'alias-suggestions',
+        error_type: 'unhandled_exception',
+      }
+    })
     return NextResponse.json(
       { error: 'Failed to submit alias suggestion' },
       { status: 500 }
