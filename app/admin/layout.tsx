@@ -18,6 +18,7 @@ import {
   Search,
   Command,
   Tag,
+  Briefcase,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -26,6 +27,7 @@ const navItems = [
   { href: "/admin/mail", icon: Mail, label: "Mail" },
   { href: "/admin/requests", icon: Inbox, label: "Requests" },
   { href: "/admin/aliases", icon: Tag, label: "Aliases" },
+  { href: "/admin/companies", icon: Briefcase, label: "Companies" },
   { href: "/admin/mailboxes", icon: Package, label: "Mailboxes" },
   { href: "/admin/renters", icon: Users, label: "Renters" },
   { href: "/admin/compliance", icon: FileCheck, label: "Compliance" },
