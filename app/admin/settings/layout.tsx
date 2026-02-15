@@ -13,6 +13,7 @@ import {
   Zap,
   Plug,
   ChevronRight,
+  AlertTriangle,
 } from "lucide-react";
 
 const settingsNav = [
@@ -25,6 +26,7 @@ const settingsNav = [
   { href: "/admin/settings/access", icon: Users, label: "Access" },
   { href: "/admin/settings/automations", icon: Zap, label: "Automations" },
   { href: "/admin/settings/integrations", icon: Plug, label: "Integrations" },
+  { href: "/admin/settings/maintenance", icon: AlertTriangle, label: "Maintenance" },
 ];
 
 export default function SettingsLayout({

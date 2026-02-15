@@ -2,17 +2,52 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * Operator Context Resolution Middleware
+ * Combined Middleware: Operator Context + Maintenance Mode
  * 
- * Implements ACC v1.0 Section 3: Operator Context Resolution
- * 
- * Resolves effective_operator_id for every request:
- * 1. Token has custom:operator_id → use it (reject X-Operator-Id header)
- * 2. Token is platform_admin → require X-Operator-Id header
- * 3. Else → reject with 403 OPERATOR_CONTEXT_REQUIRED
- * 
- * Attaches resolved context to request headers for downstream use.
+ * 1. Maintenance Mode: Blocks customer routes when enabled
+ * 2. Operator Context: Resolves effective_operator_id per ACC v1.0
  */
+
+// Maintenance mode cache
+let maintenanceCache: { isEnabled: boolean; message: string; updatedAt: number } | null = null;
+const MAINTENANCE_CACHE_TTL = 30000; // 30 seconds
+
+async function checkMaintenanceMode(): Promise<{ is_enabled: boolean; message: string }> {
+  // Check cache
+  if (maintenanceCache && Date.now() - maintenanceCache.updatedAt < MAINTENANCE_CACHE_TTL) {
+    return { is_enabled: maintenanceCache.isEnabled, message: maintenanceCache.message };
+  }
+  
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    
+    const { data } = await supabase
+      .from('system_settings')
+      .select('setting_value')
+      .eq('setting_key', 'maintenance_mode')
+      .single();
+    
+    const parsed = data?.setting_value as { is_enabled?: boolean; message?: string } | null;
+    const result = {
+      is_enabled: parsed?.is_enabled || false,
+      message: parsed?.message || 'We are performing scheduled maintenance. Please check back soon.'
+    };
+    
+    // Update cache
+    maintenanceCache = {
+      isEnabled: result.is_enabled,
+      message: result.message,
+      updatedAt: Date.now()
+    };
+    
+    return result;
+  } catch {
+    // Fail open
+    return { is_enabled: false, message: '' };
+  }
+}
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -24,9 +59,12 @@ const PLATFORM_PATHS = [
   '/api/health',
   '/api/auth/detect-provider',
   '/api/auth/callback',
+  '/api/auth/emergency-login',
   '/_next/',
   '/static/',
   '/favicon.ico',
+  '/maintenance',
+  '/api/admin/maintenance-mode',
 ];
 
 // Paths that are publicly accessible
@@ -186,10 +224,34 @@ function createErrorResponse(
 }
 
 /**
+ * Check if route should bypass maintenance mode (admin routes)
+ */
+function isAdminRoute(pathname: string): boolean {
+  return pathname.startsWith('/admin') || 
+         pathname.startsWith('/api/admin') ||
+         pathname.startsWith('/api/auth');
+}
+
+/**
  * Main middleware function
  */
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   const pathname = request.nextUrl.pathname;
+  
+  // Check maintenance mode FIRST (before auth checks)
+  // Allow admin routes to bypass maintenance mode
+  if (!isAdminRoute(pathname) && !shouldSkipContextResolution(pathname)) {
+    const maintenance = await checkMaintenanceMode();
+    
+    if (maintenance.is_enabled) {
+      // Redirect to maintenance page
+      const maintenanceUrl = new URL('/maintenance', request.url);
+      if (maintenance.message) {
+        maintenanceUrl.searchParams.set('message', maintenance.message);
+      }
+      return NextResponse.redirect(maintenanceUrl);
+    }
+  }
   
   // Skip context resolution for certain paths
   if (shouldSkipContextResolution(pathname)) {
